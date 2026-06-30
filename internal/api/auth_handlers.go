@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/tanq16/expenseowl/internal/auth"
 	"github.com/tanq16/expenseowl/internal/storage"
@@ -12,13 +13,14 @@ import (
 
 // userDTO is the sanitized view of a user returned by the API (no password hash).
 type userDTO struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	IsAdmin  bool   `json:"isAdmin"`
+	ID         string `json:"id"`
+	Username   string `json:"username"`
+	IsAdmin    bool   `json:"isAdmin"`
+	TelegramID string `json:"telegramID"`
 }
 
 func toUserDTO(u storage.User) userDTO {
-	return userDTO{ID: u.ID, Username: u.Username, IsAdmin: u.IsAdmin}
+	return userDTO{ID: u.ID, Username: u.Username, IsAdmin: u.IsAdmin, TelegramID: u.TelegramID}
 }
 
 // ServeLoginPage serves the login form. If already authenticated, redirect home.
@@ -148,9 +150,10 @@ func (h *Handler) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		IsAdmin  bool   `json:"isAdmin"`
+		Username   string `json:"username"`
+		Password   string `json:"password"`
+		IsAdmin    bool   `json:"isAdmin"`
+		TelegramID string `json:"telegramID"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})
@@ -166,12 +169,40 @@ func (h *Handler) createUser(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to hash password"})
 		return
 	}
-	user := storage.User{Username: req.Username, PasswordHash: hash, IsAdmin: req.IsAdmin}
+	user := storage.User{Username: req.Username, PasswordHash: hash, IsAdmin: req.IsAdmin, TelegramID: req.TelegramID}
 	if err := h.storage.CreateUser(user); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "success"})
+}
+
+// UpdateUserTelegramID links (or clears) a user's Telegram chat ID (admin only).
+func (h *Handler) UpdateUserTelegramID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
+		return
+	}
+	if _, ok := h.requireAdmin(w, r); !ok {
+		return
+	}
+	var req struct {
+		ID         string `json:"id"`
+		TelegramID string `json:"telegramID"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})
+		return
+	}
+	if req.ID == "" {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "ID is required"})
+		return
+	}
+	if err := h.storage.UpdateUserTelegramID(req.ID, strings.TrimSpace(req.TelegramID)); err != nil {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
 }
 
 // DeleteUser removes a user (admin only). An admin cannot delete themselves.

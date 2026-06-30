@@ -8,15 +8,22 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tanq16/expenseowl/internal/ai"
 	"github.com/tanq16/expenseowl/internal/auth"
 	"github.com/tanq16/expenseowl/internal/storage"
+	"github.com/tanq16/expenseowl/internal/telegram"
 	"github.com/tanq16/expenseowl/internal/web"
 )
 
-// Handler holds the storage interface and the session store
+// Handler holds the storage interface and the session store. The Telegram
+// fields are optional and only set when the bot is configured (see
+// EnableTelegram); when nil, the webhook route is not registered.
 type Handler struct {
-	storage  storage.Storage
-	sessions *auth.SessionStore
+	storage       storage.Storage
+	sessions      *auth.SessionStore
+	telegram      *telegram.Client
+	extractor     *ai.Extractor
+	webhookSecret string
 }
 
 // NewHandler creates a new API handler

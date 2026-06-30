@@ -168,6 +168,24 @@ func (s *jsonStore) GetUserByID(id string) (User, error) {
 	return User{}, fmt.Errorf("user with ID %s not found", id)
 }
 
+func (s *jsonStore) GetUserByTelegramID(telegramID string) (User, error) {
+	s.usersMu.RLock()
+	defer s.usersMu.RUnlock()
+	if telegramID == "" {
+		return User{}, fmt.Errorf("telegram ID cannot be empty")
+	}
+	data, err := s.readUsersFile()
+	if err != nil {
+		return User{}, err
+	}
+	for _, u := range data.Users {
+		if u.TelegramID == telegramID {
+			return u, nil
+		}
+	}
+	return User{}, fmt.Errorf("user with Telegram ID %s not found", telegramID)
+}
+
 func (s *jsonStore) ListUsers() ([]User, error) {
 	s.usersMu.RLock()
 	defer s.usersMu.RUnlock()
@@ -188,6 +206,30 @@ func (s *jsonStore) UpdateUserPassword(id, passwordHash string) error {
 	for i := range data.Users {
 		if data.Users[i].ID == id {
 			data.Users[i].PasswordHash = passwordHash
+			return s.writeUsersFile(data)
+		}
+	}
+	return fmt.Errorf("user with ID %s not found", id)
+}
+
+func (s *jsonStore) UpdateUserTelegramID(id, telegramID string) error {
+	s.usersMu.Lock()
+	defer s.usersMu.Unlock()
+	data, err := s.readUsersFile()
+	if err != nil {
+		return err
+	}
+	// enforce uniqueness so two users can't share a chat.id
+	if telegramID != "" {
+		for i := range data.Users {
+			if data.Users[i].TelegramID == telegramID && data.Users[i].ID != id {
+				return fmt.Errorf("Telegram ID %s is already linked to another user", telegramID)
+			}
+		}
+	}
+	for i := range data.Users {
+		if data.Users[i].ID == id {
+			data.Users[i].TelegramID = telegramID
 			return s.writeUsersFile(data)
 		}
 	}

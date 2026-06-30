@@ -88,6 +88,10 @@
                     <label for="newUserPassword">Contraseña</label>
                     <input type="password" id="newUserPassword" autocomplete="new-password" required>
                 </div>
+                <div class="form-group">
+                    <label for="newUserTelegramID">Telegram ID (opcional)</label>
+                    <input type="text" id="newUserTelegramID" autocomplete="off" placeholder="ej. 123456789">
+                </div>
                 <div class="form-group form-group-checkbox">
                     <label for="newUserIsAdmin">Admin</label>
                     <input type="checkbox" id="newUserIsAdmin" class="styled-checkbox">
@@ -937,8 +941,9 @@
                 const users = await res.json();
                 list.innerHTML = (users || []).map(u => `
                     <div class="category-item">
-                        <span>${escapeHTML(u.username)}${u.isAdmin ? ' <strong>(admin)</strong>' : ''}</span>
+                        <span>${escapeHTML(u.username)}${u.isAdmin ? ' <strong>(admin)</strong>' : ''}${u.telegramID ? ` <small>· TG ${escapeHTML(u.telegramID)}</small>` : ''}</span>
                         <span>
+                            <button class="nav-button" onclick="setUserTelegram('${u.id}', '${escapeHTML(u.username)}', '${escapeHTML(u.telegramID || '')}')">Telegram</button>
                             <button class="nav-button" onclick="resetUserPassword('${u.id}', '${escapeHTML(u.username)}')">Reset clave</button>
                             <button class="nav-button" onclick="deleteUser('${u.id}', '${escapeHTML(u.username)}')">Eliminar</button>
                         </span>
@@ -959,6 +964,27 @@
                 } else {
                     const err = await res.json();
                     showMessage('usersMessage', err.error || 'No se pudo eliminar', false);
+                }
+            } catch (e) {
+                showMessage('usersMessage', 'Error de red', false);
+            }
+        }
+
+        async function setUserTelegram(id, username, current) {
+            const telegramID = prompt(`Telegram chat ID para "${username}" (vacío para desvincular):`, current || '');
+            if (telegramID === null) return;
+            try {
+                const res = await fetch('/users/telegram', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id, telegramID: telegramID.trim() })
+                });
+                if (res.ok) {
+                    showMessage('usersMessage', 'Telegram ID actualizado', true);
+                    await loadUsers();
+                } else {
+                    const err = await res.json();
+                    showMessage('usersMessage', err.error || 'No se pudo actualizar', false);
                 }
             } catch (e) {
                 showMessage('usersMessage', 'Error de red', false);
@@ -1022,7 +1048,8 @@
             const payload = {
                 username: document.getElementById('newUsername').value,
                 password: document.getElementById('newUserPassword').value,
-                isAdmin: document.getElementById('newUserIsAdmin').checked
+                isAdmin: document.getElementById('newUserIsAdmin').checked,
+                telegramID: document.getElementById('newUserTelegramID').value.trim()
             };
             try {
                 const res = await fetch('/users', {

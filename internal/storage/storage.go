@@ -17,8 +17,10 @@ type Storage interface {
 	CreateUser(user User) error
 	GetUserByUsername(username string) (User, error)
 	GetUserByID(id string) (User, error)
+	GetUserByTelegramID(telegramID string) (User, error)
 	ListUsers() ([]User, error)
 	UpdateUserPassword(id, passwordHash string) error
+	UpdateUserTelegramID(id, telegramID string) error
 	DeleteUser(id string) error
 	CountUsers() (int, error)
 
@@ -72,6 +74,7 @@ type User struct {
 	Username     string    `json:"username"`
 	PasswordHash string    `json:"passwordHash"`
 	IsAdmin      bool      `json:"isAdmin"`
+	TelegramID   string    `json:"telegramID"` // chat.id linked by an admin; lets the bot attribute expenses
 	CreatedAt    time.Time `json:"createdAt"`
 }
 

@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/tanq16/expenseowl/internal/ai"
 	"github.com/tanq16/expenseowl/internal/api"
 	"github.com/tanq16/expenseowl/internal/auth"
 	"github.com/tanq16/expenseowl/internal/storage"
+	"github.com/tanq16/expenseowl/internal/telegram"
 	"github.com/tanq16/expenseowl/internal/web"
 )
 
@@ -43,6 +45,35 @@ func bootstrapAdmin(store storage.Storage) {
 	log.Printf("Created initial admin user '%s'", username)
 }
 
+// setupTelegram enables the Telegram bot if its env vars are present and
+// registers the webhook with Telegram using the public Railway domain. When
+// credentials are missing, the bot is simply disabled and the web app runs
+// normally.
+func setupTelegram(handler *api.Handler) {
+	token := os.Getenv("TELEGRAM_BOT_TOKEN")
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	if token == "" || apiKey == "" {
+		log.Println("Telegram bot disabled (set TELEGRAM_BOT_TOKEN and ANTHROPIC_API_KEY to enable)")
+		return
+	}
+	secret := os.Getenv("TELEGRAM_WEBHOOK_SECRET")
+	client := telegram.NewClient(token)
+	handler.EnableTelegram(client, ai.NewExtractor(), secret)
+	log.Println("Telegram bot enabled")
+
+	domain := os.Getenv("RAILWAY_PUBLIC_DOMAIN")
+	if domain == "" {
+		log.Println("RAILWAY_PUBLIC_DOMAIN not set — skipping automatic setWebhook; register the webhook manually")
+		return
+	}
+	webhookURL := fmt.Sprintf("https://%s/telegram/webhook", domain)
+	if err := client.SetWebhook(webhookURL, secret); err != nil {
+		log.Printf("Failed to register Telegram webhook: %v", err)
+		return
+	}
+	log.Printf("Registered Telegram webhook at %s", webhookURL)
+}
+
 func runServer(port int) {
 	store, err := storage.InitializeStorage()
 	if err != nil {
@@ -53,6 +84,7 @@ func runServer(port int) {
 
 	sessions := auth.NewSessionStore()
 	handler := api.NewHandler(store, sessions)
+	setupTelegram(handler)
 
 	// Version Handler (public)
 	http.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
@@ -108,6 +140,12 @@ func runServer(port int) {
 	http.HandleFunc("/users", handler.RequireAPI(handler.Users))
 	http.HandleFunc("/users/delete", handler.RequireAPI(handler.DeleteUser))
 	http.HandleFunc("/users/password", handler.RequireAPI(handler.UpdateUserPassword))
+	http.HandleFunc("/users/telegram", handler.RequireAPI(handler.UpdateUserTelegramID))
+
+	// Telegram webhook (public — authenticated via the secret-token header)
+	if handler.TelegramEnabled() {
+		http.HandleFunc("/telegram/webhook", handler.TelegramWebhook)
+	}
 
 	// Config (protected; PUT endpoints enforce admin inside the handlers)
 	http.HandleFunc("/config", handler.RequireAPI(handler.GetConfig))

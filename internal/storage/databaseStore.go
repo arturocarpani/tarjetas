@@ -62,6 +62,7 @@ const (
 		username VARCHAR(255) NOT NULL UNIQUE,
 		password_hash TEXT NOT NULL,
 		is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+		telegram_id TEXT,
 		created_at TIMESTAMPTZ NOT NULL
 	);`
 
@@ -73,7 +74,8 @@ const (
 	ALTER TABLE recurring_expenses ADD COLUMN IF NOT EXISTS card TEXT;
 	ALTER TABLE config ADD COLUMN IF NOT EXISTS cards TEXT;
 	ALTER TABLE expenses ADD COLUMN IF NOT EXISTS user_id TEXT;
-	ALTER TABLE recurring_expenses ADD COLUMN IF NOT EXISTS user_id TEXT;`
+	ALTER TABLE recurring_expenses ADD COLUMN IF NOT EXISTS user_id TEXT;
+	ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_id TEXT;`
 )
 
 func InitializePostgresStore(baseConfig SystemConfig) (Storage, error) {
@@ -121,22 +123,32 @@ func (s *databaseStore) CreateUser(user User) error {
 	if user.CreatedAt.IsZero() {
 		user.CreatedAt = time.Now()
 	}
-	query := `INSERT INTO users (id, username, password_hash, is_admin, created_at) VALUES ($1, $2, $3, $4, $5)`
-	_, err := s.db.Exec(query, user.ID, user.Username, user.PasswordHash, user.IsAdmin, user.CreatedAt)
+	query := `INSERT INTO users (id, username, password_hash, is_admin, telegram_id, created_at) VALUES ($1, $2, $3, $4, $5, $6)`
+	_, err := s.db.Exec(query, user.ID, user.Username, user.PasswordHash, user.IsAdmin, nullString(user.TelegramID), user.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create user: %v", err)
 	}
 	return nil
 }
 
+// nullString maps an empty string to SQL NULL so the unique-ish telegram_id
+// column stays sparse rather than storing many empty strings.
+func nullString(s string) sql.NullString {
+	return sql.NullString{String: s, Valid: s != ""}
+}
+
 func scanUser(scanner interface{ Scan(...any) error }) (User, error) {
 	var u User
-	err := scanner.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.IsAdmin, &u.CreatedAt)
+	var telegramID sql.NullString
+	err := scanner.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.IsAdmin, &telegramID, &u.CreatedAt)
+	if telegramID.Valid {
+		u.TelegramID = telegramID.String
+	}
 	return u, err
 }
 
 func (s *databaseStore) GetUserByUsername(username string) (User, error) {
-	query := `SELECT id, username, password_hash, is_admin, created_at FROM users WHERE username = $1`
+	query := `SELECT id, username, password_hash, is_admin, telegram_id, created_at FROM users WHERE username = $1`
 	u, err := scanUser(s.db.QueryRow(query, username))
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -148,7 +160,7 @@ func (s *databaseStore) GetUserByUsername(username string) (User, error) {
 }
 
 func (s *databaseStore) GetUserByID(id string) (User, error) {
-	query := `SELECT id, username, password_hash, is_admin, created_at FROM users WHERE id = $1`
+	query := `SELECT id, username, password_hash, is_admin, telegram_id, created_at FROM users WHERE id = $1`
 	u, err := scanUser(s.db.QueryRow(query, id))
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -159,8 +171,23 @@ func (s *databaseStore) GetUserByID(id string) (User, error) {
 	return u, nil
 }
 
+func (s *databaseStore) GetUserByTelegramID(telegramID string) (User, error) {
+	if telegramID == "" {
+		return User{}, fmt.Errorf("telegram ID cannot be empty")
+	}
+	query := `SELECT id, username, password_hash, is_admin, telegram_id, created_at FROM users WHERE telegram_id = $1`
+	u, err := scanUser(s.db.QueryRow(query, telegramID))
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return User{}, fmt.Errorf("user with Telegram ID %s not found", telegramID)
+		}
+		return User{}, fmt.Errorf("failed to get user: %v", err)
+	}
+	return u, nil
+}
+
 func (s *databaseStore) ListUsers() ([]User, error) {
-	query := `SELECT id, username, password_hash, is_admin, created_at FROM users ORDER BY created_at`
+	query := `SELECT id, username, password_hash, is_admin, telegram_id, created_at FROM users ORDER BY created_at`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query users: %v", err)
@@ -181,6 +208,26 @@ func (s *databaseStore) UpdateUserPassword(id, passwordHash string) error {
 	res, err := s.db.Exec(`UPDATE users SET password_hash = $1 WHERE id = $2`, passwordHash, id)
 	if err != nil {
 		return fmt.Errorf("failed to update password: %v", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("user with ID %s not found", id)
+	}
+	return nil
+}
+
+func (s *databaseStore) UpdateUserTelegramID(id, telegramID string) error {
+	if telegramID != "" {
+		var existing string
+		err := s.db.QueryRow(`SELECT id FROM users WHERE telegram_id = $1`, telegramID).Scan(&existing)
+		if err == nil && existing != id {
+			return fmt.Errorf("Telegram ID %s is already linked to another user", telegramID)
+		} else if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("failed to check telegram id: %v", err)
+		}
+	}
+	res, err := s.db.Exec(`UPDATE users SET telegram_id = $1 WHERE id = $2`, nullString(telegramID), id)
+	if err != nil {
+		return fmt.Errorf("failed to update telegram id: %v", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("user with ID %s not found", id)

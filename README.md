@@ -190,6 +190,38 @@ variables (both optional):
 
 Sessions are kept in memory (cookie-based), so a restart requires logging in again.
 
+### Telegram Bot (AI expense capture)
+
+ExpenseOwl can run an optional Telegram bot that reads an expense from a text message
+**or a photo of a receipt** and loads it for the right user. It uses Claude (Opus 4.8,
+with vision for photos) to extract the name, amount, category, card, date, and tags, then
+saves the expense through the same path as the web UI.
+
+The bot is enabled only when both `TELEGRAM_BOT_TOKEN` and `ANTHROPIC_API_KEY` are set;
+otherwise the app logs `Telegram bot disabled` and runs normally.
+
+| Variable | Sample Value | Details |
+| --- | --- | --- |
+| TELEGRAM_BOT_TOKEN | 123456:ABC-... | bot token from [@BotFather](https://t.me/BotFather) |
+| ANTHROPIC_API_KEY | sk-ant-... | required for the AI extraction |
+| TELEGRAM_WEBHOOK_SECRET | a-random-string | optional; sent as the `X-Telegram-Bot-Api-Secret-Token` header so only Telegram can post to the webhook |
+
+Setup:
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token into `TELEGRAM_BOT_TOKEN`.
+2. Set `ANTHROPIC_API_KEY` (and optionally a random `TELEGRAM_WEBHOOK_SECRET`).
+3. Deploy. On startup the app registers the webhook automatically at
+   `https://<RAILWAY_PUBLIC_DOMAIN>/telegram/webhook` (if `RAILWAY_PUBLIC_DOMAIN` is set;
+   otherwise register it manually).
+4. Each person sends a message to the bot. If they aren't linked yet, the bot replies with
+   their **chat ID**. An admin pastes that ID into **Settings → Usuarios → Telegram** for the
+   matching user (you can also get it from [@userinfobot](https://t.me/userinfobot)).
+5. From then on, the user can send `Almuerzo 4500 en restaurante` or a receipt photo and the
+   expense is recorded under their account.
+
+Expenses created by the bot are attributed to the linked user, so per-user isolation and the
+admin's consolidated view work the same as in the web app.
+
 ### Data Backends
 
 ExpenseOwl supports two data backends - JSON (default), and Postgres. Postgres was added with v4.0 of the app primarily for homelabbers to reuse their Postgres instances as needed for better backup compatibility.
