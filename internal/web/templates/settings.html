@@ -72,6 +72,24 @@
             </div>
         </div>
 
+        <div class="form-container" id="users-section" style="display: none;">
+            <h2 align="center">Usuarios</h2>
+            <div id="users-manager">
+                <div id="users-list" class="categories-list">
+                </div>
+                <div class="category-input-container">
+                    <input type="text" id="newUserName" placeholder="Usuario">
+                    <input type="password" id="newUserPass" placeholder="Contraseña">
+                    <label for="newUserAdmin" class="users-admin-label">
+                        <input type="checkbox" id="newUserAdmin" class="styled-checkbox">
+                        Admin
+                    </label>
+                    <button id="createUser" class="nav-button">Crear usuario</button>
+                </div>
+                <div id="usersMessage" class="form-message"></div>
+            </div>
+        </div>
+
         <div class="settings-container">
             <div class="form-container half-width">
                 <h2 align="center">Currency Settings</h2>
@@ -275,6 +293,7 @@
         let editFormSelectedTags = new Set();
         let currentCurrency = "usd";
         let currentStartDate = 1;
+        let currentUser = null;
         let draggedItem = null;
         let recurringExpenses = [];
         let recurringExpenseToDelete = null;
@@ -478,6 +497,141 @@
             } catch (error) {
                 console.error('Error saving cards:', error);
                 showMessage('cardsMessage', 'Error saving cards', false);
+            }
+        }
+
+        // --- User Management ---
+        async function loadCurrentUser() {
+            try {
+                const response = await fetch('/auth/me');
+                if (!response.ok) return;
+                currentUser = await response.json();
+                if (currentUser && currentUser.isAdmin) {
+                    document.getElementById('users-section').style.display = 'block';
+                    await loadUsers();
+                }
+            } catch (error) {
+                console.error('Error fetching current user:', error);
+            }
+        }
+
+        async function loadUsers() {
+            const list = document.getElementById('users-list');
+            try {
+                const response = await fetch('/users');
+                if (!response.ok) throw new Error('Failed to fetch users');
+                const users = await response.json() || [];
+                list.innerHTML = '';
+                users.forEach(user => {
+                    const item = document.createElement('div');
+                    item.className = 'category-item';
+
+                    const infoArea = document.createElement('div');
+                    infoArea.className = 'category-handle-area';
+
+                    const nameSpan = document.createElement('span');
+                    let label = escapeHTML(user.username);
+                    if (user.isAdmin) label += ' (admin)';
+                    if (currentUser && user.id === currentUser.id) label += ' (vos)';
+                    nameSpan.innerHTML = label;
+                    infoArea.appendChild(nameSpan);
+                    item.appendChild(infoArea);
+
+                    const actions = document.createElement('div');
+
+                    const resetBtn = document.createElement('button');
+                    resetBtn.className = 'nav-button';
+                    resetBtn.textContent = 'Reset';
+                    resetBtn.onclick = () => resetPassword(user.id);
+                    actions.appendChild(resetBtn);
+
+                    if (!currentUser || user.id !== currentUser.id) {
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.className = 'delete-button';
+                        deleteBtn.textContent = 'Borrar';
+                        deleteBtn.onclick = () => deleteUser(user.id);
+                        actions.appendChild(deleteBtn);
+                    }
+
+                    item.appendChild(actions);
+                    list.appendChild(item);
+                });
+            } catch (error) {
+                console.error('Error loading users:', error);
+                showMessage('usersMessage', 'Error loading users', false);
+            }
+        }
+
+        async function createUser() {
+            const nameInput = document.getElementById('newUserName');
+            const passInput = document.getElementById('newUserPass');
+            const adminInput = document.getElementById('newUserAdmin');
+            const username = nameInput.value.trim();
+            const password = passInput.value;
+            const isAdmin = adminInput.checked;
+            try {
+                const response = await fetch('/users', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password, isAdmin })
+                });
+                if (response.ok) {
+                    nameInput.value = '';
+                    passInput.value = '';
+                    adminInput.checked = false;
+                    await loadUsers();
+                    showMessage('usersMessage', 'Usuario creado correctamente', true);
+                } else if (response.status === 409) {
+                    showMessage('usersMessage', 'Usuario ya existe', false);
+                } else {
+                    const error = await response.json();
+                    showMessage('usersMessage', error.error || 'No se pudo crear el usuario', false);
+                }
+            } catch (error) {
+                console.error('Error creating user:', error);
+                showMessage('usersMessage', 'Error al crear el usuario', false);
+            }
+        }
+
+        async function deleteUser(id) {
+            if (!window.confirm('¿Borrar este usuario?')) return;
+            try {
+                const response = await fetch(`/users/delete?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+                if (response.ok) {
+                    await loadUsers();
+                    showMessage('usersMessage', 'Usuario borrado', true);
+                } else {
+                    const error = await response.json();
+                    showMessage('usersMessage', error.error || 'No se pudo borrar el usuario', false);
+                }
+            } catch (error) {
+                console.error('Error deleting user:', error);
+                showMessage('usersMessage', 'Error al borrar el usuario', false);
+            }
+        }
+
+        async function resetPassword(id) {
+            const password = window.prompt('Nueva contraseña (mínimo 8 caracteres):');
+            if (password === null) return;
+            if (password.length < 8) {
+                showMessage('usersMessage', 'La contraseña debe tener al menos 8 caracteres', false);
+                return;
+            }
+            try {
+                const response = await fetch('/users/password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id, password })
+                });
+                if (response.ok) {
+                    showMessage('usersMessage', 'Contraseña actualizada', true);
+                } else {
+                    const error = await response.json();
+                    showMessage('usersMessage', error.error || 'No se pudo actualizar la contraseña', false);
+                }
+            } catch (error) {
+                console.error('Error resetting password:', error);
+                showMessage('usersMessage', 'Error al actualizar la contraseña', false);
             }
         }
 
@@ -890,6 +1044,7 @@
                 renderRecurringExpenses(recurringExpenses);
 
                 createTagInput('tags-input', 'selected-tags', 'tags-dropdown', addFormSelectedTags);
+                loadCurrentUser();
                 fetch('/version').then(r => r.ok ? r.text() : 'dev').then(version => {
                     const link = document.getElementById('version-link');
                     link.textContent = version;
@@ -933,6 +1088,7 @@
         document.getElementById('csv-import-file-old').addEventListener('change', handleCsvImportOld);
         document.getElementById('newCategory').addEventListener('keypress', e => e.key === 'Enter' && addCategory());
         document.getElementById('newCard').addEventListener('keypress', e => e.key === 'Enter' && addCard());
+        document.getElementById('createUser').addEventListener('click', createUser);
 
         document.getElementById('recurringExpenseForm').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -976,6 +1132,8 @@
         document.addEventListener('DOMContentLoaded', initialize);
         window.removeCategory = removeCategory;
         window.removeCard = removeCard;
+        window.deleteUser = deleteUser;
+        window.resetPassword = resetPassword;
         window.showRecurringDeleteModal = showRecurringDeleteModal;
         window.closeRecurringDeleteModal = closeRecurringDeleteModal;
         window.confirmRecurringDelete = confirmRecurringDelete;

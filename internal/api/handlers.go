@@ -9,20 +9,22 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tanq16/expenseowl/internal/ai"
 	"github.com/tanq16/expenseowl/internal/auth"
 	"github.com/tanq16/expenseowl/internal/storage"
 	"github.com/tanq16/expenseowl/internal/web"
 )
 
-// Handler holds the storage interface and the auth manager.
+// Handler holds the storage interface, the auth manager, and the AI scanner.
 type Handler struct {
 	storage storage.Storage
 	auth    *auth.Manager
+	scanner *ai.Scanner
 }
 
 // NewHandler creates a new API handler
-func NewHandler(s storage.Storage, a *auth.Manager) *Handler {
-	return &Handler{storage: s, auth: a}
+func NewHandler(s storage.Storage, a *auth.Manager, sc *ai.Scanner) *Handler {
+	return &Handler{storage: s, auth: a, scanner: sc}
 }
 
 // ErrorResponse is a generic JSON error response

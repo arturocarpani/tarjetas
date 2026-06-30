@@ -17,7 +17,7 @@ func newCardHandler(t *testing.T) (*Handler, string) {
 	if err != nil {
 		t.Fatalf("InitializeJsonStore: %v", err)
 	}
-	h := NewHandler(s, auth.NewManager([]byte("test-secret"), s))
+	h := NewHandler(s, auth.NewManager([]byte("test-secret"), s), nil)
 	u, err := s.CreateUser(storage.User{Username: "tester", PasswordHash: "x"})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)

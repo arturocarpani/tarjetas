@@ -152,3 +152,54 @@ function escapeHTML(str) {
         }[tag] || tag)
     );
 }
+
+// --- Auth: session-expiry handling + nav user menu ---------------------------
+// Wrap fetch so any 401 (expired/invalid session) bounces the user to /login
+// instead of failing silently. Installed as soon as functions.js executes,
+// before the per-page scripts run their requests.
+(function () {
+    const _fetch = window.fetch.bind(window);
+    let redirecting = false;
+    window.fetch = async function (...args) {
+        const res = await _fetch(...args);
+        if (res.status === 401 && !redirecting) {
+            redirecting = true;
+            window.location.href = '/login';
+        }
+        return res;
+    };
+})();
+
+// Inject the current username + a logout button into the nav bar on every page.
+document.addEventListener('DOMContentLoaded', async () => {
+    const navBar = document.querySelector('.nav-bar');
+    if (!navBar) return;
+    let user = null;
+    try {
+        const r = await fetch('/auth/me');
+        if (r.ok) user = await r.json();
+    } catch (e) { /* offline / not logged in */ }
+
+    const wrap = document.createElement('div');
+    wrap.className = 'user-menu';
+    wrap.style.cssText = 'margin-left:auto;display:flex;align-items:center;gap:10px;';
+
+    const name = document.createElement('span');
+    name.className = 'user-name';
+    name.style.cssText = 'opacity:.8;font-weight:600;';
+    name.textContent = user ? user.username : '';
+
+    const logout = document.createElement('button');
+    logout.className = 'view-button';
+    logout.title = 'Cerrar sesión';
+    logout.setAttribute('data-tooltip', 'Cerrar sesión');
+    logout.innerHTML = '<i class="fa-solid fa-right-from-bracket"></i>';
+    logout.addEventListener('click', async () => {
+        try { await fetch('/auth/logout', { method: 'POST' }); } catch (e) {}
+        window.location.href = '/login';
+    });
+
+    wrap.appendChild(name);
+    wrap.appendChild(logout);
+    navBar.appendChild(wrap);
+});

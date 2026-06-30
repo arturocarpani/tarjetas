@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/tanq16/expenseowl/internal/ai"
 	"github.com/tanq16/expenseowl/internal/api"
 	"github.com/tanq16/expenseowl/internal/auth"
 	"github.com/tanq16/expenseowl/internal/storage"
@@ -30,7 +31,13 @@ func runServer(port int) {
 	if os.Getenv("COOKIE_SECURE") == "true" {
 		authMgr.Secure = true
 	}
-	handler := api.NewHandler(store, authMgr)
+	scanner := ai.NewScanner()
+	if scanner.Enabled() {
+		log.Println("AI receipt scanning enabled (model:", scanner.Model, ")")
+	} else {
+		log.Println("AI receipt scanning disabled (set ANTHROPIC_API_KEY to enable)")
+	}
+	handler := api.NewHandler(store, authMgr, scanner)
 
 	// ---- public mux: reachable without a session -------------------------
 	public := http.NewServeMux()
@@ -92,6 +99,7 @@ func runServer(port int) {
 
 	// expenses
 	protected.HandleFunc("/expense", handler.AddExpense)
+	protected.HandleFunc("/expense/scan", handler.ScanReceipt)
 	protected.HandleFunc("/expenses", handler.GetExpenses)
 	protected.HandleFunc("/expense/edit", handler.EditExpense)
 	protected.HandleFunc("/expense/delete", handler.DeleteExpense)
