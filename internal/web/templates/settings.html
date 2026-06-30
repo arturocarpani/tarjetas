@@ -58,6 +58,20 @@
             </div>
         </div>
 
+        <div class="form-container">
+            <h2 align="center">Tarjetas</h2>
+            <div id="cards-manager">
+                <div id="cards-list" class="categories-list">
+                </div>
+                <div class="category-input-container">
+                    <input type="text" id="newCard" placeholder="Add new card">
+                    <button id="addCard" class="nav-button">Add</button>
+                </div>
+                <button id="saveCards" class="nav-button">Save Cards</button>
+                <div id="cardsMessage" class="form-message"></div>
+            </div>
+        </div>
+
         <div class="settings-container">
             <div class="form-container half-width">
                 <h2 align="center">Currency Settings</h2>
@@ -131,6 +145,10 @@
                 <div class="form-group">
                     <label for="recurringCategory">Category</label>
                     <select id="recurringCategory" required></select>
+                </div>
+                <div class="form-group">
+                    <label for="recurringCard">Tarjeta</label>
+                    <select id="recurringCard"></select>
                 </div>
                 <div class="form-group">
                     <label for="tags-input">Tags</label>
@@ -207,6 +225,10 @@
                     <select id="editRecurringCategory" required></select>
                 </div>
                 <div class="form-group">
+                    <label for="editRecurringCard">Tarjeta</label>
+                    <select id="editRecurringCard"></select>
+                </div>
+                <div class="form-group">
                     <label for="edit-tags-input">Tags</label>
                     <div class="tags-input-container">
                         <div id="edit-selected-tags" class="selected-tags"></div>
@@ -247,6 +269,7 @@
     <script src="/functions.js"></script>
     <script>
         let categories = [];
+        let cards = [];
         let allTags = new Set();
         let addFormSelectedTags = new Set();
         let editFormSelectedTags = new Set();
@@ -391,7 +414,73 @@
                 showMessage('categoriesMessage', 'Error saving categories', false);
             }
         }
-        
+
+        // --- Card Management ---
+        function renderCards() {
+            const list = document.getElementById('cards-list');
+            list.innerHTML = '';
+            cards.forEach((card, index) => {
+                const item = document.createElement('div');
+                item.className = 'category-item';
+                item.dataset.index = index;
+                item.innerHTML = `
+                    <div class="category-handle-area">
+                        <span>${card}</span>
+                    </div>
+                    <button class="delete-button" onclick="removeCard(${index})">
+                        <i class="fa-solid fa-times"></i>
+                    </button>
+                `;
+                list.appendChild(item);
+            });
+        }
+
+        function addCard() {
+            const input = document.getElementById('newCard');
+            let card = input.value.trim();
+            card = card.replace(/[<>]/g, ' ').trim();
+            if (card && !cards.includes(card)) {
+                cards.push(card);
+                renderCards();
+                input.value = '';
+            } else if (cards.includes(card)) {
+                showMessage('cardsMessage', 'Card already exists', false);
+            } else if (!card) {
+                showMessage('cardsMessage', 'Card name cannot be empty.', false);
+            }
+        }
+
+        function removeCard(index) {
+            cards.splice(index, 1);
+            renderCards();
+        }
+
+        function populateCardSelects() {
+            const options = `<option value="">(sin tarjeta)</option>` + cards.map(c => `<option value="${c}">${c}</option>`).join('');
+            document.getElementById('recurringCard').innerHTML = options;
+            document.getElementById('editRecurringCard').innerHTML = options;
+        }
+
+        async function saveCards() {
+            try {
+                const response = await fetch('/cards/edit', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(cards)
+                });
+                if (response.ok) {
+                    showMessage('cardsMessage', 'Cards saved successfully', true);
+                    populateCardSelects();
+                } else {
+                    const error = await response.json();
+                    showMessage('cardsMessage', `Failed to save cards: ${error.error}`, false);
+                }
+            } catch (error) {
+                console.error('Error saving cards:', error);
+                showMessage('cardsMessage', 'Error saving cards', false);
+            }
+        }
+
         // --- Tag Input Component ---
         function createTagInput(inputId, selectedContainerId, dropdownId, selectedTagsSet) {
             const input = document.getElementById(inputId);
@@ -630,6 +719,7 @@
             document.getElementById('editRecurringAmount').value = Math.abs(recurringExpenseToEdit.amount);
             document.getElementById('editRecurringReportGain').checked = recurringExpenseToEdit.amount > 0;
             document.getElementById('editRecurringCategory').value = recurringExpenseToEdit.category;
+            document.getElementById('editRecurringCard').value = recurringExpenseToEdit.card || '';
             document.getElementById('editRecurringInterval').value = recurringExpenseToEdit.interval;
             document.getElementById('editRecurringStartDate').value = new Date(recurringExpenseToEdit.startDate).toISOString().split('T')[0];
             document.getElementById('editRecurringOccurrences').value = recurringExpenseToEdit.occurrences;
@@ -655,6 +745,7 @@
                 name: document.getElementById('editRecurringName').value,
                 amount: amount,
                 category: document.getElementById('editRecurringCategory').value,
+                card: document.getElementById('editRecurringCard').value,
                 tags: Array.from(editFormSelectedTags),
                 interval: document.getElementById('editRecurringInterval').value,
                 startDate: new Date(document.getElementById('editRecurringStartDate').value).toISOString(),
@@ -782,6 +873,7 @@
                 recurringExpenses = await recurringExpensesResponse.json() || [];
 
                 categories = [...config.categories];
+                cards = [...(config.cards || [])];
                 currentCurrency = config.currency;
                 currentStartDate = config.startDate;
                 allTags.clear();
@@ -789,10 +881,12 @@
                 (recurringExpenses || []).forEach(exp => (exp.tags || []).forEach(tag => allTags.add(tag)));
 
                 renderCategories();
+                renderCards();
                 populateCurrencySelect();
                 populateStartDateInput();
                 document.getElementById('recurringCategory').innerHTML = categories.map(c => `<option value="${c}">${c}</option>`).join('');
                 document.getElementById('editRecurringCategory').innerHTML = categories.map(c => `<option value="${c}">${c}</option>`).join('');
+                populateCardSelects();
                 renderRecurringExpenses(recurringExpenses);
 
                 createTagInput('tags-input', 'selected-tags', 'tags-dropdown', addFormSelectedTags);
@@ -831,11 +925,14 @@
         // --- Event Listeners ---
         document.getElementById('addCategory').addEventListener('click', addCategory);
         document.getElementById('saveCategories').addEventListener('click', saveCategories);
+        document.getElementById('addCard').addEventListener('click', addCard);
+        document.getElementById('saveCards').addEventListener('click', saveCards);
         document.getElementById('saveCurrency').addEventListener('click', saveCurrency);
         document.getElementById('saveStartDate').addEventListener('click', saveStartDate);
         document.getElementById('csv-import-file').addEventListener('change', handleCsvImport);
         document.getElementById('csv-import-file-old').addEventListener('change', handleCsvImportOld);
         document.getElementById('newCategory').addEventListener('keypress', e => e.key === 'Enter' && addCategory());
+        document.getElementById('newCard').addEventListener('keypress', e => e.key === 'Enter' && addCard());
 
         document.getElementById('recurringExpenseForm').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -847,6 +944,7 @@
                 name: document.getElementById('recurringName').value,
                 amount: amount,
                 category: document.getElementById('recurringCategory').value,
+                card: document.getElementById('recurringCard').value,
                 tags: Array.from(addFormSelectedTags),
                 interval: document.getElementById('recurringInterval').value,
                 startDate: getISODateWithLocalTime(document.getElementById('recurringStartDate').value),
@@ -877,6 +975,7 @@
 
         document.addEventListener('DOMContentLoaded', initialize);
         window.removeCategory = removeCategory;
+        window.removeCard = removeCard;
         window.showRecurringDeleteModal = showRecurringDeleteModal;
         window.closeRecurringDeleteModal = closeRecurringDeleteModal;
         window.confirmRecurringDelete = confirmRecurringDelete;

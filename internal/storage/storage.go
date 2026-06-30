@@ -16,6 +16,8 @@ type Storage interface {
 	// Basic Config Updates
 	GetCategories() ([]string, error)
 	UpdateCategories(categories []string) error
+	GetCards() ([]string, error)
+	UpdateCards(cards []string) error
 	// GetTags() ([]string, error)
 	// UpdateTags(tags []string) error
 	GetCurrency() (string, error)
@@ -47,6 +49,7 @@ type Storage interface {
 // config for expense data
 type Config struct {
 	Categories        []string           `json:"categories"`
+	Cards             []string           `json:"cards"`
 	Currency          string             `json:"currency"`
 	StartDate         int                `json:"startDate"`
 	RecurringExpenses []RecurringExpense `json:"recurringExpenses"`
@@ -60,6 +63,7 @@ type RecurringExpense struct {
 	Currency    string    `json:"currency"`
 	Tags        []string  `json:"tags"`
 	Category    string    `json:"category"`
+	Card        string    `json:"card"`
 	StartDate   time.Time `json:"startDate"`   // date of the first occurrence
 	Interval    string    `json:"interval"`    // daily, weekly, monthly, yearly
 	Occurrences int       `json:"occurrences"` // 0 for 3000 occurrences (heuristic)
@@ -88,6 +92,7 @@ type Expense struct {
 	Name        string    `json:"name"`
 	Tags        []string  `json:"tags"`
 	Category    string    `json:"category"`
+	Card        string    `json:"card"`
 	Amount      float64   `json:"amount"`
 	Currency    string    `json:"currency"`
 	Date        time.Time `json:"date"`
@@ -95,6 +100,7 @@ type Expense struct {
 
 func (c *Config) SetBaseConfig() {
 	c.Categories = defaultCategories
+	c.Cards = []string{}
 	c.Currency = "usd"
 	c.StartDate = 1
 	// c.Tags = []string{}
@@ -175,6 +181,7 @@ func (e *Expense) Validate() error {
 	if e.Category == "" {
 		return fmt.Errorf("expense 'category' cannot be empty")
 	}
+	e.Card = SanitizeString(e.Card) // optional; empty means "no card"
 	if e.Amount == 0 {
 		return fmt.Errorf("expense 'amount' cannot be 0")
 	}
@@ -205,6 +212,7 @@ func (e *RecurringExpense) Validate() error {
 	if e.Category == "" {
 		return fmt.Errorf("recurring expense 'category' cannot be empty")
 	}
+	e.Card = SanitizeString(e.Card) // optional; empty means "no card"
 	if len(e.Tags) > 0 {
 		var cleanedTags []string
 		for _, tag := range e.Tags {

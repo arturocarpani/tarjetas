@@ -31,7 +31,7 @@ func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	defer writer.Flush()
 
 	// Write header
-	headers := []string{"ID", "Name", "Category", "Amount", "Date", "Tags"}
+	headers := []string{"ID", "Name", "Category", "Card", "Amount", "Date", "Tags"}
 	if err := writer.Write(headers); err != nil {
 		log.Printf("API ERROR: Failed to write CSV header: %v\n", err)
 		return
@@ -43,6 +43,7 @@ func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 			expense.ID,
 			expense.Name,
 			expense.Category,
+			expense.Card,
 			// expense.Currency,
 			strconv.FormatFloat(expense.Amount, 'f', 2, 64),
 			expense.Date.Format(time.RFC3339),
@@ -100,6 +101,7 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 	idIdx, idExists := colMap["id"]
 	tagsIdx, tagsExists := colMap["tags"]
 	currencyIdx, currencyExists := colMap["currency"]
+	cardIdx, cardExists := colMap["card"]
 
 	currentCategories, err := h.storage.GetCategories()
 	if err != nil {
@@ -177,9 +179,15 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		var card string
+		if cardExists {
+			card = strings.TrimSpace(record[cardIdx])
+		}
+
 		expense := storage.Expense{
 			Name:     strings.TrimSpace(record[colMap["name"]]),
 			Category: category,
+			Card:     card,
 			Amount:   amount,
 			Currency: localCurrency,
 			Date:     date,
