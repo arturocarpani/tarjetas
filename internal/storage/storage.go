@@ -4,47 +4,74 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
 
-// Storage interface for all storage types
+// Storage interface for all storage types.
+//
+// All expense/recurring/config operations are scoped to a userID so that each
+// user has an isolated dataset. User-management methods operate on the global
+// users collection.
 type Storage interface {
 	Close() error
-	GetConfig() (*Config, error)
 
-	// Basic Config Updates
-	GetCategories() ([]string, error)
-	UpdateCategories(categories []string) error
-	GetCards() ([]string, error)
-	UpdateCards(cards []string) error
-	// GetTags() ([]string, error)
-	// UpdateTags(tags []string) error
-	GetCurrency() (string, error)
-	UpdateCurrency(currency string) error
-	GetStartDate() (int, error)
-	UpdateStartDate(startDate int) error
+	// Users (global)
+	CreateUser(u User) (User, error)
+	GetUserByID(id string) (User, error)
+	GetUserByUsername(username string) (User, error)
+	GetUserByTelegramChatID(chatID int64) (User, error)
+	ListUsers() ([]User, error)
+	UpdateUser(u User) error
+	DeleteUser(id string) error
+	CountUsers() (int, error)
 
-	// Recurring Expenses
-	GetRecurringExpenses() ([]RecurringExpense, error)
-	GetRecurringExpense(id string) (RecurringExpense, error)
-	AddRecurringExpense(recurringExpense RecurringExpense) error
-	RemoveRecurringExpense(id string, removeAll bool) error
-	UpdateRecurringExpense(id string, recurringExpense RecurringExpense, updateAll bool) error
+	// Config (per user)
+	GetConfig(userID string) (*Config, error)
+	GetCategories(userID string) ([]string, error)
+	UpdateCategories(userID string, categories []string) error
+	GetCards(userID string) ([]string, error)
+	UpdateCards(userID string, cards []string) error
+	GetCurrency(userID string) (string, error)
+	UpdateCurrency(userID string, currency string) error
+	GetStartDate(userID string) (int, error)
+	UpdateStartDate(userID string, startDate int) error
 
-	// Expenses
-	GetAllExpenses() ([]Expense, error)
-	GetExpense(id string) (Expense, error)
-	AddExpense(expense Expense) error
-	RemoveExpense(id string) error
-	AddMultipleExpenses(expenses []Expense) error
-	RemoveMultipleExpenses(ids []string) error
-	UpdateExpense(id string, expense Expense) error
+	// Recurring Expenses (per user)
+	GetRecurringExpenses(userID string) ([]RecurringExpense, error)
+	GetRecurringExpense(userID string, id string) (RecurringExpense, error)
+	AddRecurringExpense(userID string, recurringExpense RecurringExpense) error
+	RemoveRecurringExpense(userID string, id string, removeAll bool) error
+	UpdateRecurringExpense(userID string, id string, recurringExpense RecurringExpense, updateAll bool) error
 
-	// Potential Future Feature: Multi-currency
-	// GetConversions() (map[string]float64, error)
-	// UpdateConversions(conversions map[string]float64) error
+	// Expenses (per user)
+	GetAllExpenses(userID string) ([]Expense, error)
+	GetExpense(userID string, id string) (Expense, error)
+	AddExpense(userID string, expense Expense) error
+	RemoveExpense(userID string, id string) error
+	AddMultipleExpenses(userID string, expenses []Expense) error
+	RemoveMultipleExpenses(userID string, ids []string) error
+	UpdateExpense(userID string, id string, expense Expense) error
 }
+
+// User is an application account. PasswordHash is a bcrypt hash; it is persisted
+// by the storage layer but must never be exposed through the API.
+type User struct {
+	ID             string    `json:"id"`
+	Username       string    `json:"username"`
+	PasswordHash   string    `json:"passwordHash"`
+	IsAdmin        bool      `json:"isAdmin"`
+	TelegramChatID int64     `json:"telegramChatID"` // 0 = not linked
+	CreatedAt      time.Time `json:"createdAt"`
+}
+
+// ErrNotFound is returned by storage when a requested record does not exist, so
+// the API layer can map it to 404 instead of 500.
+var ErrNotFound = fmt.Errorf("not found")
+
+// ErrUsernameTaken is returned by CreateUser when the username already exists.
+var ErrUsernameTaken = fmt.Errorf("username already taken")
 
 // config for expense data
 type Config struct {
@@ -185,9 +212,15 @@ func (e *Expense) Validate() error {
 	if e.Amount == 0 {
 		return fmt.Errorf("expense 'amount' cannot be 0")
 	}
-	// if e.Currency == "" {
-	// 	return fmt.Errorf("expense 'currency' cannot be empty")
-	// }
+	// Currency is optional (empty => storage applies the user default), but if
+	// provided it must be a supported code. Validated centrally so the JSON API
+	// and CSV import enforce the same rule (audit fix M5).
+	if e.Currency != "" {
+		e.Currency = strings.ToLower(strings.TrimSpace(e.Currency))
+		if !slices.Contains(SupportedCurrencies, e.Currency) {
+			return fmt.Errorf("expense 'currency' is not a supported code: %s", e.Currency)
+		}
+	}
 	if len(e.Tags) > 0 {
 		var cleanedTags []string
 		for _, tag := range e.Tags {

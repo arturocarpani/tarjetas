@@ -19,9 +19,10 @@ func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
-	expenses, err := h.storage.GetAllExpenses()
+	uid := h.uid(r)
+	expenses, err := h.storage.GetAllExpenses(uid)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to retrieve expenses"})
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Failed to retrieve expenses"})
 		log.Printf("API ERROR: Failed to retrieve expenses for CSV export: %v\n", err)
 		return
 	}
@@ -63,6 +64,10 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
+	uid := h.uid(r)
+	// Cap the request body to 10MB to prevent resource-exhaustion via oversized
+	// uploads.
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 	if err := r.ParseMultipartForm(10 << 20); err != nil { // 10MB max file size
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Could not parse multipart form"})
 		return
@@ -103,9 +108,9 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 	currencyIdx, currencyExists := colMap["currency"]
 	cardIdx, cardExists := colMap["card"]
 
-	currentCategories, err := h.storage.GetCategories()
+	currentCategories, err := h.storage.GetCategories(uid)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Could not retrieve current categories"})
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Could not retrieve current categories"})
 		return
 	}
 	categorySet := make(map[string]bool)
@@ -115,10 +120,10 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 	var newCategories []string
 	var importedCount, skippedCount int
 	// TODO: might be worth setting default currency when we have currency updation behavior
-	currencyVal, err := h.storage.GetCurrency()
+	currencyVal, err := h.storage.GetCurrency(uid)
 	if err != nil {
 		log.Printf("Error: Could not retrieve currency, shutting down import: %v\n", err)
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Could not retrieve currency"})
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Could not retrieve currency"})
 		return
 	}
 
@@ -129,26 +134,29 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Check if expense exists by ID, if provided - without doing a clash resolution
+		// Check if expense exists by ID, if provided and non-empty - without doing
+		// a clash resolution. An empty id cell is treated as a new row (M6).
 		if idExists {
 			id := record[idIdx]
-			if _, err := h.storage.GetExpense(id); err == nil {
-				log.Printf("Info: Skipping row %d because expense with ID '%s' already exists\n", i+2, id)
-				skippedCount++
-				continue
+			if id != "" {
+				if _, err := h.storage.GetExpense(uid, id); err == nil {
+					log.Printf("Info: Skipping row %d because expense with ID '%s' already exists\n", i+2, id)
+					skippedCount++
+					continue
+				}
 			}
 		}
 
 		// Check for currency field, if provided - default is retrieved
 		localCurrency := currencyVal
 		if currencyExists {
-			currency := record[currencyIdx]
+			currency := strings.ToLower(strings.TrimSpace(record[currencyIdx]))
 			if !slices.Contains(storage.SupportedCurrencies, currency) {
 				log.Printf("Warning: Skipping row %d due to invalid currency: %s\n", i+2, currency)
 				skippedCount++
 				continue
 			}
-			localCurrency = strings.TrimSpace(currency)
+			localCurrency = currency
 		}
 
 		amount, err := strconv.ParseFloat(record[colMap["amount"]], 64)
@@ -198,17 +206,16 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 			skippedCount++
 			continue
 		}
-		if err := h.storage.AddExpense(expense); err != nil {
+		if err := h.storage.AddExpense(uid, expense); err != nil {
 			log.Printf("Error: Could not add expense from row %d: %v\n", i+2, err)
 			skippedCount++
 			continue
 		}
 		importedCount++
-		time.Sleep(10 * time.Millisecond) // Throttle to reduce storage overhead
 	}
 
 	if len(newCategories) > 0 {
-		if err := h.storage.UpdateCategories(append(currentCategories, newCategories...)); err != nil {
+		if err := h.storage.UpdateCategories(uid, append(currentCategories, newCategories...)); err != nil {
 			log.Printf("Warning: Failed to add new categories to config: %v\n", err)
 		}
 	}
@@ -229,6 +236,10 @@ func (h *Handler) ImportOldCSV(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
+	uid := h.uid(r)
+	// Cap the request body to 10MB to prevent resource-exhaustion via oversized
+	// uploads.
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 	if err := r.ParseMultipartForm(10 << 20); err != nil { // 10MB max file size
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Could not parse multipart form"})
 		return
@@ -263,9 +274,9 @@ func (h *Handler) ImportOldCSV(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	currentCategories, err := h.storage.GetCategories()
+	currentCategories, err := h.storage.GetCategories(uid)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Could not retrieve current categories"})
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Could not retrieve current categories"})
 		return
 	}
 	categorySet := make(map[string]bool)
@@ -315,17 +326,16 @@ func (h *Handler) ImportOldCSV(w http.ResponseWriter, r *http.Request) {
 			skippedCount++
 			continue
 		}
-		if err := h.storage.AddExpense(expense); err != nil {
+		if err := h.storage.AddExpense(uid, expense); err != nil {
 			log.Printf("Error: Could not add expense from row %d: %v\n", i+2, err)
 			skippedCount++
 			continue
 		}
 		importedCount++
-		time.Sleep(10 * time.Millisecond)
 	}
 
 	if len(newCategories) > 0 {
-		if err := h.storage.UpdateCategories(append(currentCategories, newCategories...)); err != nil {
+		if err := h.storage.UpdateCategories(uid, append(currentCategories, newCategories...)); err != nil {
 			log.Printf("Warning: Failed to add new categories to config: %v\n", err)
 		}
 	}

@@ -2,26 +2,27 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/tanq16/expenseowl/internal/auth"
 	"github.com/tanq16/expenseowl/internal/storage"
 	"github.com/tanq16/expenseowl/internal/web"
 )
 
-// Handler holds the storage interface
+// Handler holds the storage interface and the auth manager.
 type Handler struct {
 	storage storage.Storage
+	auth    *auth.Manager
 }
 
 // NewHandler creates a new API handler
-func NewHandler(s storage.Storage) *Handler {
-	return &Handler{
-		storage: s,
-	}
+func NewHandler(s storage.Storage, a *auth.Manager) *Handler {
+	return &Handler{storage: s, auth: a}
 }
 
 // ErrorResponse is a generic JSON error response
@@ -38,6 +39,22 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
+// uid returns the authenticated user's ID for the request. The auth middleware
+// guarantees a user is present on all routes that use these handlers.
+func (h *Handler) uid(r *http.Request) string {
+	u, _ := auth.CurrentUser(r.Context())
+	return u.ID
+}
+
+// storageErrorStatus maps a storage error to an HTTP status code: 404 for
+// not-found, 500 otherwise.
+func storageErrorStatus(err error) int {
+	if errors.Is(err, storage.ErrNotFound) {
+		return http.StatusNotFound
+	}
+	return http.StatusInternalServerError
+}
+
 // ------------------------------------------------------------
 // Config Handlers
 // ------------------------------------------------------------
@@ -47,9 +64,10 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
-	config, err := h.storage.GetConfig()
+	uid := h.uid(r)
+	config, err := h.storage.GetConfig(uid)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to get config"})
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Failed to get config"})
 		log.Printf("API ERROR: Failed to get config: %v\n", err)
 		return
 	}
@@ -61,9 +79,10 @@ func (h *Handler) GetCategories(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
-	categories, err := h.storage.GetCategories()
+	uid := h.uid(r)
+	categories, err := h.storage.GetCategories(uid)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to get categories"})
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Failed to get categories"})
 		log.Printf("API ERROR: Failed to get categories: %v\n", err)
 		return
 	}
@@ -75,6 +94,7 @@ func (h *Handler) UpdateCategories(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
+	uid := h.uid(r)
 	var categories []string
 	if err := json.NewDecoder(r.Body).Decode(&categories); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})
@@ -90,8 +110,8 @@ func (h *Handler) UpdateCategories(w http.ResponseWriter, r *http.Request) {
 		}
 		sanitizedCategories = append(sanitizedCategories, sanitized)
 	}
-	if err := h.storage.UpdateCategories(sanitizedCategories); err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to update categories"})
+	if err := h.storage.UpdateCategories(uid, sanitizedCategories); err != nil {
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Failed to update categories"})
 		log.Printf("API ERROR: Failed to update categories: %v\n", err)
 		return
 	}
@@ -103,9 +123,10 @@ func (h *Handler) GetCards(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
-	cards, err := h.storage.GetCards()
+	uid := h.uid(r)
+	cards, err := h.storage.GetCards(uid)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to get cards"})
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Failed to get cards"})
 		log.Printf("API ERROR: Failed to get cards: %v\n", err)
 		return
 	}
@@ -117,6 +138,7 @@ func (h *Handler) UpdateCards(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
+	uid := h.uid(r)
 	var cards []string
 	if err := json.NewDecoder(r.Body).Decode(&cards); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})
@@ -130,8 +152,8 @@ func (h *Handler) UpdateCards(w http.ResponseWriter, r *http.Request) {
 			sanitizedCards = append(sanitizedCards, sanitized)
 		}
 	}
-	if err := h.storage.UpdateCards(sanitizedCards); err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to update cards"})
+	if err := h.storage.UpdateCards(uid, sanitizedCards); err != nil {
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Failed to update cards"})
 		log.Printf("API ERROR: Failed to update cards: %v\n", err)
 		return
 	}
@@ -143,9 +165,10 @@ func (h *Handler) GetCurrency(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
-	currency, err := h.storage.GetCurrency()
+	uid := h.uid(r)
+	currency, err := h.storage.GetCurrency(uid)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to get currency"})
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Failed to get currency"})
 		log.Printf("API ERROR: Failed to get currency: %v\n", err)
 		return
 	}
@@ -157,13 +180,14 @@ func (h *Handler) UpdateCurrency(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
+	uid := h.uid(r)
 	var currency string
 	if err := json.NewDecoder(r.Body).Decode(&currency); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})
 		return
 	}
-	if err := h.storage.UpdateCurrency(currency); err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+	if err := h.storage.UpdateCurrency(uid, currency); err != nil {
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: err.Error()})
 		log.Printf("API ERROR: Failed to update currency: %v\n", err)
 		return
 	}
@@ -175,9 +199,10 @@ func (h *Handler) GetStartDate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
-	startDate, err := h.storage.GetStartDate()
+	uid := h.uid(r)
+	startDate, err := h.storage.GetStartDate(uid)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to get start date"})
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Failed to get start date"})
 		log.Printf("API ERROR: Failed to get start date: %v\n", err)
 		return
 	}
@@ -189,13 +214,14 @@ func (h *Handler) UpdateStartDate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
+	uid := h.uid(r)
 	var startDate int
 	if err := json.NewDecoder(r.Body).Decode(&startDate); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})
 		return
 	}
-	if err := h.storage.UpdateStartDate(startDate); err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+	if err := h.storage.UpdateStartDate(uid, startDate); err != nil {
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: err.Error()})
 		log.Printf("API ERROR: Failed to update start date: %v\n", err)
 		return
 	}
@@ -211,20 +237,23 @@ func (h *Handler) AddExpense(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
+	uid := h.uid(r)
 	var expense storage.Expense
 	if err := json.NewDecoder(r.Body).Decode(&expense); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})
 		return
 	}
+	// Apply the zero-date default BEFORE validation so a missing date defaults to
+	// now instead of failing Validate (M4).
+	if expense.Date.IsZero() {
+		expense.Date = time.Now()
+	}
 	if err := expense.Validate(); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
-	if expense.Date.IsZero() {
-		expense.Date = time.Now()
-	}
-	if err := h.storage.AddExpense(expense); err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to save expense"})
+	if err := h.storage.AddExpense(uid, expense); err != nil {
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Failed to save expense"})
 		log.Printf("API ERROR: Failed to save expense: %v\n", err)
 		return
 	}
@@ -236,9 +265,10 @@ func (h *Handler) GetExpenses(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
-	expenses, err := h.storage.GetAllExpenses()
+	uid := h.uid(r)
+	expenses, err := h.storage.GetAllExpenses(uid)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to retrieve expenses"})
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Failed to retrieve expenses"})
 		log.Printf("API ERROR: Failed to retrieve expenses: %v\n", err)
 		return
 	}
@@ -250,6 +280,7 @@ func (h *Handler) EditExpense(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
+	uid := h.uid(r)
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "ID parameter is required"})
@@ -260,12 +291,17 @@ func (h *Handler) EditExpense(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})
 		return
 	}
+	// Apply the zero-date default BEFORE validation so a missing date defaults to
+	// now instead of failing Validate (M4).
+	if expense.Date.IsZero() {
+		expense.Date = time.Now()
+	}
 	if err := expense.Validate(); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
-	if err := h.storage.UpdateExpense(id, expense); err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to edit expense"})
+	if err := h.storage.UpdateExpense(uid, id, expense); err != nil {
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Failed to edit expense"})
 		log.Printf("API ERROR: Failed to edit expense: %v\n", err)
 		return
 	}
@@ -277,13 +313,14 @@ func (h *Handler) DeleteExpense(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
+	uid := h.uid(r)
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "ID parameter is required"})
 		return
 	}
-	if err := h.storage.RemoveExpense(id); err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to delete expense"})
+	if err := h.storage.RemoveExpense(uid, id); err != nil {
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Failed to delete expense"})
 		log.Printf("API ERROR: Failed to delete expense: %v\n", err)
 		return
 	}
@@ -295,6 +332,7 @@ func (h *Handler) DeleteMultipleExpenses(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
+	uid := h.uid(r)
 	var payload struct {
 		IDs []string `json:"ids"`
 	}
@@ -302,8 +340,8 @@ func (h *Handler) DeleteMultipleExpenses(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})
 		return
 	}
-	if err := h.storage.RemoveMultipleExpenses(payload.IDs); err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to delete multiple expenses"})
+	if err := h.storage.RemoveMultipleExpenses(uid, payload.IDs); err != nil {
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Failed to delete multiple expenses"})
 		log.Printf("API ERROR: Failed to delete multiple expenses: %v\n", err)
 		return
 	}
@@ -319,6 +357,7 @@ func (h *Handler) AddRecurringExpense(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
+	uid := h.uid(r)
 	var re storage.RecurringExpense
 	if err := json.NewDecoder(r.Body).Decode(&re); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})
@@ -328,8 +367,8 @@ func (h *Handler) AddRecurringExpense(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
-	if err := h.storage.AddRecurringExpense(re); err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to add recurring expense"})
+	if err := h.storage.AddRecurringExpense(uid, re); err != nil {
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Failed to add recurring expense"})
 		log.Printf("API ERROR: Failed to add recurring expense: %v\n", err)
 		return
 	}
@@ -341,9 +380,10 @@ func (h *Handler) GetRecurringExpenses(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
-	res, err := h.storage.GetRecurringExpenses()
+	uid := h.uid(r)
+	res, err := h.storage.GetRecurringExpenses(uid)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to get recurring expenses"})
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Failed to get recurring expenses"})
 		log.Printf("API ERROR: Failed to get recurring expenses: %v\n", err)
 		return
 	}
@@ -355,6 +395,7 @@ func (h *Handler) UpdateRecurringExpense(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
+	uid := h.uid(r)
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "ID parameter is required"})
@@ -371,8 +412,8 @@ func (h *Handler) UpdateRecurringExpense(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
-	if err := h.storage.UpdateRecurringExpense(id, re, updateAll); err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to update recurring expense"})
+	if err := h.storage.UpdateRecurringExpense(uid, id, re, updateAll); err != nil {
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Failed to update recurring expense"})
 		log.Printf("API ERROR: Failed to update recurring expense: %v\n", err)
 		return
 	}
@@ -384,6 +425,7 @@ func (h *Handler) DeleteRecurringExpense(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
+	uid := h.uid(r)
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "ID parameter is required"})
@@ -391,8 +433,8 @@ func (h *Handler) DeleteRecurringExpense(w http.ResponseWriter, r *http.Request)
 	}
 	removeAll, _ := strconv.ParseBool(r.URL.Query().Get("removeAll"))
 
-	if err := h.storage.RemoveRecurringExpense(id, removeAll); err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to delete recurring expense"})
+	if err := h.storage.RemoveRecurringExpense(uid, id, removeAll); err != nil {
+		writeJSON(w, storageErrorStatus(err), ErrorResponse{Error: "Failed to delete recurring expense"})
 		log.Printf("API ERROR: Failed to delete recurring expense: %v\n", err)
 		return
 	}

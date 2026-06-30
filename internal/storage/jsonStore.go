@@ -2,23 +2,33 @@ package storage
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
-	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-// JSONStore implementats Storage interface - for JSON file storage
+// jsonStore implements Storage on the local filesystem with a per-user layout:
+//
+//	<baseDir>/users.json                      -> all user records
+//	<baseDir>/users/<userID>/expenses.json    -> that user's expenses
+//	<baseDir>/users/<userID>/config.json      -> that user's config (incl. recurring)
+//
+// A single RWMutex guards all file access. All writes go through writeFileAtomic
+// (temp file + fsync + rename) so a crash or full disk can never corrupt a store.
 type jsonStore struct {
-	configPath string
-	filePath   string
-	mu         sync.RWMutex
-	defaults   map[string]string // allows reusing defaults without querying for config
+	baseDir   string
+	usersPath string
+	mu        sync.RWMutex
+}
+
+type usersFileData struct {
+	Users []User `json:"users"`
 }
 
 type expensesFileData struct {
@@ -26,466 +36,657 @@ type expensesFileData struct {
 }
 
 func InitializeJsonStore(baseConfig SystemConfig) (*jsonStore, error) {
-	configPath := filepath.Join(baseConfig.StorageURL, "config.json")
-	filePath := filepath.Join(baseConfig.StorageURL, "expenses.json")
-	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
-		return nil, fmt.Errorf("failed to create storage directory: %v", err)
+	baseDir := baseConfig.StorageURL
+	if err := os.MkdirAll(filepath.Join(baseDir, "users"), 0o755); err != nil {
+		return nil, fmt.Errorf("failed to create storage directory: %w", err)
 	}
-
-	// create expenses file if it doesn't exist
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		initialData := expensesFileData{Expenses: []Expense{}}
-		data, err := json.Marshal(initialData)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal initial data: %v", err)
-		}
-		if err := os.WriteFile(filePath, data, 0644); err != nil {
-			return nil, fmt.Errorf("failed to create storage file: %v", err)
-		}
-		log.Println("Created expense storage file")
-	} else {
-		log.Println("Found existing expense storage file")
+	s := &jsonStore{
+		baseDir:   baseDir,
+		usersPath: filepath.Join(baseDir, "users.json"),
 	}
-
-	// create config file if it doesn't exist
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		initialConfig := Config{}
-		initialConfig.SetBaseConfig()
-		data, err := json.Marshal(initialConfig)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal initial config: %v", err)
+	if _, err := os.Stat(s.usersPath); errors.Is(err, os.ErrNotExist) {
+		if err := s.writeUsers(&usersFileData{Users: []User{}}); err != nil {
+			return nil, fmt.Errorf("failed to create users file: %w", err)
 		}
-		if err := os.WriteFile(configPath, data, 0644); err != nil {
-			return nil, fmt.Errorf("failed to create config file: %v", err)
-		}
-		log.Println("Created expense storage config")
-	} else {
-		log.Println("Found existing expense storage config")
 	}
-
-	return &jsonStore{
-		configPath: configPath,
-		filePath:   filePath,
-		defaults:   map[string]string{},
-	}, nil
+	return s, nil
 }
 
-// primitive methods
+func (s *jsonStore) Close() error { return nil }
 
-func (s *jsonStore) readExpensesFile(path string) (*expensesFileData, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var data expensesFileData
-	if err := json.Unmarshal(content, &data); err != nil {
-		return nil, err
-	}
-	log.Println("Read expenses file")
-	return &data, nil
-}
+// ---- atomic write + path helpers -------------------------------------------
 
-func (s *jsonStore) writeExpensesFile(path string, data *expensesFileData) error {
-	content, err := json.MarshalIndent(data, "", "    ")
+// writeFileAtomic writes data to a temp file in the same directory, fsyncs it,
+// and renames it over path (atomic on POSIX; replace-existing on Windows).
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
 	if err != nil {
 		return err
 	}
-	log.Println("Wrote expenses file")
-	return os.WriteFile(path, content, 0644)
-}
-
-func (s *jsonStore) readConfigFile(path string) (*Config, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var data Config
-	if err := json.Unmarshal(content, &data); err != nil {
-		return nil, err
-	}
-	log.Println("Read config file")
-	return &data, nil
-}
-
-func (s *jsonStore) writeConfigFile(path string, data *Config) error {
-	content, err := json.MarshalIndent(data, "", "    ")
-	if err != nil {
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once renamed
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
 		return err
 	}
-	log.Println("Wrote config file")
-	return os.WriteFile(path, content, 0644)
-}
-
-// ------------------------------------------------------------
-// JSONStore interface methods
-// ------------------------------------------------------------
-
-func (s *jsonStore) Close() error {
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	// Best-effort durability of the rename itself.
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
 	return nil
 }
 
-func (s *jsonStore) GetConfig() (*Config, error) {
+func (s *jsonStore) userDir(userID string) string  { return filepath.Join(s.baseDir, "users", userID) }
+func (s *jsonStore) expensesPath(uid string) string { return filepath.Join(s.userDir(uid), "expenses.json") }
+func (s *jsonStore) configPath(uid string) string   { return filepath.Join(s.userDir(uid), "config.json") }
+
+// ---- low-level (no locking; callers hold s.mu) -----------------------------
+
+func (s *jsonStore) readUsers() (*usersFileData, error) {
+	content, err := os.ReadFile(s.usersPath)
+	if err != nil {
+		return nil, err
+	}
+	var d usersFileData
+	if err := json.Unmarshal(content, &d); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+func (s *jsonStore) writeUsers(d *usersFileData) error {
+	b, err := json.MarshalIndent(d, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(s.usersPath, b)
+}
+
+func (s *jsonStore) readConfig(userID string) (*Config, error) {
+	content, err := os.ReadFile(s.configPath(userID))
+	if errors.Is(err, os.ErrNotExist) {
+		c := &Config{}
+		c.SetBaseConfig()
+		return c, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var c Config
+	if err := json.Unmarshal(content, &c); err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (s *jsonStore) writeConfig(userID string, c *Config) error {
+	if err := os.MkdirAll(s.userDir(userID), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(s.configPath(userID), b)
+}
+
+func (s *jsonStore) readExpenses(userID string) (*expensesFileData, error) {
+	content, err := os.ReadFile(s.expensesPath(userID))
+	if errors.Is(err, os.ErrNotExist) {
+		return &expensesFileData{Expenses: []Expense{}}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var d expensesFileData
+	if err := json.Unmarshal(content, &d); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+func (s *jsonStore) writeExpenses(userID string, d *expensesFileData) error {
+	if err := os.MkdirAll(s.userDir(userID), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(d, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(s.expensesPath(userID), b)
+}
+
+// appendExpenses adds rows without locking; callers must already hold s.mu.
+func (s *jsonStore) appendExpenses(userID string, toAdd []Expense) error {
+	if len(toAdd) == 0 {
+		return nil
+	}
+	d, err := s.readExpenses(userID)
+	if err != nil {
+		return err
+	}
+	d.Expenses = append(d.Expenses, toAdd...)
+	return s.writeExpenses(userID, d)
+}
+
+// defaultCurrency returns the user's configured currency (used when an expense
+// is saved without one). Reads under the caller's existing lock.
+func (s *jsonStore) defaultCurrency(userID string) string {
+	c, err := s.readConfig(userID)
+	if err != nil {
+		return ""
+	}
+	return c.Currency
+}
+
+// ---- Users -----------------------------------------------------------------
+
+func (s *jsonStore) CreateUser(u User) (User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, err := s.readUsers()
+	if err != nil {
+		return User{}, err
+	}
+	for _, e := range d.Users {
+		if strings.EqualFold(e.Username, u.Username) {
+			return User{}, ErrUsernameTaken
+		}
+	}
+	if u.ID == "" {
+		u.ID = uuid.New().String()
+	}
+	if u.CreatedAt.IsZero() {
+		u.CreatedAt = time.Now()
+	}
+	d.Users = append(d.Users, u)
+	if err := s.writeUsers(d); err != nil {
+		return User{}, err
+	}
+	c := &Config{}
+	c.SetBaseConfig()
+	if err := s.writeConfig(u.ID, c); err != nil {
+		return User{}, err
+	}
+	if err := s.writeExpenses(u.ID, &expensesFileData{Expenses: []Expense{}}); err != nil {
+		return User{}, err
+	}
+	return u, nil
+}
+
+func (s *jsonStore) GetUserByID(id string) (User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.readConfigFile(s.configPath)
+	d, err := s.readUsers()
+	if err != nil {
+		return User{}, err
+	}
+	for _, u := range d.Users {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+	return User{}, ErrNotFound
 }
 
-// Basic Config Updates
+func (s *jsonStore) GetUserByUsername(username string) (User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	d, err := s.readUsers()
+	if err != nil {
+		return User{}, err
+	}
+	for _, u := range d.Users {
+		if strings.EqualFold(u.Username, username) {
+			return u, nil
+		}
+	}
+	return User{}, ErrNotFound
+}
 
-func (s *jsonStore) GetCategories() ([]string, error) {
-	config, err := s.GetConfig()
+func (s *jsonStore) GetUserByTelegramChatID(chatID int64) (User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if chatID == 0 {
+		return User{}, ErrNotFound
+	}
+	d, err := s.readUsers()
+	if err != nil {
+		return User{}, err
+	}
+	for _, u := range d.Users {
+		if u.TelegramChatID == chatID {
+			return u, nil
+		}
+	}
+	return User{}, ErrNotFound
+}
+
+func (s *jsonStore) ListUsers() ([]User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	d, err := s.readUsers()
 	if err != nil {
 		return nil, err
 	}
-	return config.Categories, nil
+	return d.Users, nil
 }
 
-func (s *jsonStore) UpdateCategories(categories []string) error {
+func (s *jsonStore) UpdateUser(u User) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	data, err := s.readConfigFile(s.configPath)
+	d, err := s.readUsers()
 	if err != nil {
-		return fmt.Errorf("failed to read config file: %v", err)
+		return err
 	}
-	data.Categories = categories
-	return s.writeConfigFile(s.configPath, data)
+	for i, e := range d.Users {
+		if e.ID == u.ID {
+			d.Users[i] = u
+			return s.writeUsers(d)
+		}
+	}
+	return ErrNotFound
 }
 
-func (s *jsonStore) GetCards() ([]string, error) {
-	config, err := s.GetConfig()
+func (s *jsonStore) DeleteUser(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, err := s.readUsers()
+	if err != nil {
+		return err
+	}
+	found := false
+	out := d.Users[:0]
+	for _, u := range d.Users {
+		if u.ID == id {
+			found = true
+			continue
+		}
+		out = append(out, u)
+	}
+	if !found {
+		return ErrNotFound
+	}
+	d.Users = out
+	if err := s.writeUsers(d); err != nil {
+		return err
+	}
+	return os.RemoveAll(s.userDir(id))
+}
+
+func (s *jsonStore) CountUsers() (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	d, err := s.readUsers()
+	if err != nil {
+		return 0, err
+	}
+	return len(d.Users), nil
+}
+
+// ---- Config (per user) -----------------------------------------------------
+
+func (s *jsonStore) GetConfig(userID string) (*Config, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.readConfig(userID)
+}
+
+func (s *jsonStore) GetCategories(userID string) ([]string, error) {
+	c, err := s.GetConfig(userID)
 	if err != nil {
 		return nil, err
 	}
-	return config.Cards, nil
+	return c.Categories, nil
 }
 
-func (s *jsonStore) UpdateCards(cards []string) error {
+func (s *jsonStore) UpdateCategories(userID string, categories []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	data, err := s.readConfigFile(s.configPath)
+	c, err := s.readConfig(userID)
 	if err != nil {
-		return fmt.Errorf("failed to read config file: %v", err)
+		return err
 	}
-	data.Cards = cards
-	return s.writeConfigFile(s.configPath, data)
+	c.Categories = categories
+	return s.writeConfig(userID, c)
 }
 
-func (s *jsonStore) GetCurrency() (string, error) {
-	config, err := s.GetConfig()
+func (s *jsonStore) GetCards(userID string) ([]string, error) {
+	c, err := s.GetConfig(userID)
+	if err != nil {
+		return nil, err
+	}
+	return c.Cards, nil
+}
+
+func (s *jsonStore) UpdateCards(userID string, cards []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, err := s.readConfig(userID)
+	if err != nil {
+		return err
+	}
+	c.Cards = cards
+	return s.writeConfig(userID, c)
+}
+
+func (s *jsonStore) GetCurrency(userID string) (string, error) {
+	c, err := s.GetConfig(userID)
 	if err != nil {
 		return "", err
 	}
-	return config.Currency, nil
+	return c.Currency, nil
 }
 
-func (s *jsonStore) UpdateCurrency(currency string) error {
-	if !slices.Contains(SupportedCurrencies, currency) {
+func (s *jsonStore) UpdateCurrency(userID string, currency string) error {
+	if !slicesContains(SupportedCurrencies, currency) {
 		return fmt.Errorf("invalid currency: %s", currency)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	data, err := s.readConfigFile(s.configPath)
+	c, err := s.readConfig(userID)
 	if err != nil {
-		return fmt.Errorf("failed to read config file: %v", err)
+		return err
 	}
-	data.Currency = currency
-	s.defaults["currency"] = currency
-	return s.writeConfigFile(s.configPath, data)
+	c.Currency = currency
+	return s.writeConfig(userID, c)
 }
 
-func (s *jsonStore) GetStartDate() (int, error) {
-	config, err := s.GetConfig()
+func (s *jsonStore) GetStartDate(userID string) (int, error) {
+	c, err := s.GetConfig(userID)
 	if err != nil {
 		return 0, err
 	}
-	return config.StartDate, nil
+	return c.StartDate, nil
 }
 
-func (s *jsonStore) UpdateStartDate(startDate int) error {
+func (s *jsonStore) UpdateStartDate(userID string, startDate int) error {
 	if startDate < 1 || startDate > 31 {
 		return fmt.Errorf("invalid start date: %d", startDate)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	data, err := s.readConfigFile(s.configPath)
+	c, err := s.readConfig(userID)
 	if err != nil {
-		return fmt.Errorf("failed to read config file: %v", err)
+		return err
 	}
-	data.StartDate = startDate
-	s.defaults["start_date"] = fmt.Sprintf("%d", startDate)
-	return s.writeConfigFile(s.configPath, data)
+	c.StartDate = startDate
+	return s.writeConfig(userID, c)
 }
 
-func (s *jsonStore) GetRecurringExpenses() ([]RecurringExpense, error) {
-	config, err := s.GetConfig()
+// ---- Recurring expenses (per user) -----------------------------------------
+
+func (s *jsonStore) GetRecurringExpenses(userID string) ([]RecurringExpense, error) {
+	c, err := s.GetConfig(userID)
 	if err != nil {
 		return nil, err
 	}
-	return config.RecurringExpenses, nil
+	return c.RecurringExpenses, nil
 }
 
-func (s *jsonStore) GetRecurringExpense(id string) (RecurringExpense, error) {
-	recurringExpenses, err := s.GetRecurringExpenses()
+func (s *jsonStore) GetRecurringExpense(userID string, id string) (RecurringExpense, error) {
+	res, err := s.GetRecurringExpenses(userID)
 	if err != nil {
 		return RecurringExpense{}, err
 	}
-	for _, r := range recurringExpenses {
+	for _, r := range res {
 		if r.ID == id {
 			return r, nil
 		}
 	}
-	return RecurringExpense{}, fmt.Errorf("recurring expense with ID %s not found", id)
+	return RecurringExpense{}, ErrNotFound
 }
 
-func (s *jsonStore) AddRecurringExpense(recurringExpense RecurringExpense) error {
+func (s *jsonStore) AddRecurringExpense(userID string, re RecurringExpense) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	config, err := s.readConfigFile(s.configPath)
+	c, err := s.readConfig(userID)
 	if err != nil {
-		return fmt.Errorf("failed to read config file: %v", err)
+		return err
 	}
-	if recurringExpense.ID == "" {
-		recurringExpense.ID = uuid.New().String()
+	if re.ID == "" {
+		re.ID = uuid.New().String()
 	}
-	if recurringExpense.Currency == "" {
-		recurringExpense.Currency = s.defaults["currency"]
+	if re.Currency == "" {
+		re.Currency = c.Currency
 	}
-	config.RecurringExpenses = append(config.RecurringExpenses, recurringExpense)
-	if err := s.writeConfigFile(s.configPath, config); err != nil {
-		return fmt.Errorf("failed to write config file: %v", err)
+	c.RecurringExpenses = append(c.RecurringExpenses, re)
+	if err := s.writeConfig(userID, c); err != nil {
+		return err
 	}
-	expensesToAdd := generateExpensesFromRecurring(recurringExpense, false)
-	return s.AddMultipleExpenses(expensesToAdd)
+	return s.appendExpenses(userID, generateExpensesFromRecurring(re, false))
 }
 
-func (s *jsonStore) RemoveRecurringExpense(id string, removeAll bool) error {
+func (s *jsonStore) RemoveRecurringExpense(userID string, id string, removeAll bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	config, err := s.readConfigFile(s.configPath)
+	c, err := s.readConfig(userID)
 	if err != nil {
-		return fmt.Errorf("failed to read config file: %v", err)
+		return err
 	}
-	var found bool
-	var updatedRecurringExpenses []RecurringExpense
-	for _, r := range config.RecurringExpenses {
+	found := false
+	kept := make([]RecurringExpense, 0, len(c.RecurringExpenses))
+	for _, r := range c.RecurringExpenses {
 		if r.ID == id {
 			found = true
-		} else {
-			updatedRecurringExpenses = append(updatedRecurringExpenses, r)
+			continue
 		}
+		kept = append(kept, r)
 	}
 	if !found {
-		return fmt.Errorf("recurring expense with ID %s not found", id)
+		return ErrNotFound
 	}
-	config.RecurringExpenses = updatedRecurringExpenses
-	expensesData, err := s.readExpensesFile(s.filePath)
+	c.RecurringExpenses = kept
+	data, err := s.readExpenses(userID)
 	if err != nil {
-		return fmt.Errorf("failed to read storage file: %v", err)
+		return err
 	}
-	var updatedExpenses []Expense
 	today := time.Now()
-	for _, exp := range expensesData.Expenses {
+	keptExp := make([]Expense, 0, len(data.Expenses))
+	for _, exp := range data.Expenses {
 		if exp.RecurringID != id {
-			updatedExpenses = append(updatedExpenses, exp)
+			keptExp = append(keptExp, exp)
 			continue
 		}
 		if !removeAll && !exp.Date.After(today) {
-			updatedExpenses = append(updatedExpenses, exp)
+			keptExp = append(keptExp, exp) // preserve past instances
 		}
 	}
-	expensesData.Expenses = updatedExpenses
-	if err := s.writeExpensesFile(s.filePath, expensesData); err != nil {
+	data.Expenses = keptExp
+	if err := s.writeExpenses(userID, data); err != nil {
 		return err
 	}
-	return s.writeConfigFile(s.configPath, config)
+	return s.writeConfig(userID, c)
 }
 
-func (s *jsonStore) UpdateRecurringExpense(id string, recurringExpense RecurringExpense, updateAll bool) error {
+func (s *jsonStore) UpdateRecurringExpense(userID string, id string, re RecurringExpense, updateAll bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	config, err := s.readConfigFile(s.configPath)
+	c, err := s.readConfig(userID)
 	if err != nil {
-		return fmt.Errorf("failed to read config file: %v", err)
+		return err
 	}
-	var found bool
-	for i, r := range config.RecurringExpenses {
+	found := false
+	for i, r := range c.RecurringExpenses {
 		if r.ID == id {
-			recurringExpense.ID = id // Ensure ID is preserved
-			if recurringExpense.Currency == "" {
-				recurringExpense.Currency = s.defaults["currency"]
+			re.ID = id
+			if re.Currency == "" {
+				re.Currency = c.Currency
 			}
-			config.RecurringExpenses[i] = recurringExpense
+			c.RecurringExpenses[i] = re
 			found = true
 			break
 		}
 	}
 	if !found {
-		return fmt.Errorf("recurring expense with ID %s not found", id)
+		return ErrNotFound
 	}
-	expensesData, err := s.readExpensesFile(s.filePath)
+	data, err := s.readExpenses(userID)
 	if err != nil {
-		return fmt.Errorf("failed to read storage file: %v", err)
+		return err
 	}
-	var remainingExpenses []Expense
 	today := time.Now()
-	for _, exp := range expensesData.Expenses {
+	kept := make([]Expense, 0, len(data.Expenses))
+	for _, exp := range data.Expenses {
 		if exp.RecurringID != id {
-			remainingExpenses = append(remainingExpenses, exp)
+			kept = append(kept, exp)
 			continue
 		}
 		if !updateAll && !exp.Date.After(today) {
-			remainingExpenses = append(remainingExpenses, exp)
+			kept = append(kept, exp)
 		}
 	}
-	expensesData.Expenses = remainingExpenses
-	expensesToAdd := generateExpensesFromRecurring(recurringExpense, !updateAll)
-	expensesData.Expenses = append(expensesData.Expenses, expensesToAdd...)
-	if err := s.writeExpensesFile(s.filePath, expensesData); err != nil {
+	kept = append(kept, generateExpensesFromRecurring(re, !updateAll)...)
+	data.Expenses = kept
+	if err := s.writeExpenses(userID, data); err != nil {
 		return err
 	}
-	return s.writeConfigFile(s.configPath, config)
+	return s.writeConfig(userID, c)
 }
 
-// Expenses
+// ---- Expenses (per user) ---------------------------------------------------
 
-func (s *jsonStore) GetAllExpenses() ([]Expense, error) {
+func (s *jsonStore) GetAllExpenses(userID string) ([]Expense, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	data, err := s.readExpensesFile(s.filePath)
+	d, err := s.readExpenses(userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read storage file: %v", err)
+		return nil, err
 	}
-	return data.Expenses, nil
+	return d.Expenses, nil
 }
 
-func (s *jsonStore) GetExpense(id string) (Expense, error) {
+func (s *jsonStore) GetExpense(userID string, id string) (Expense, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	data, err := s.readExpensesFile(s.filePath)
+	d, err := s.readExpenses(userID)
 	if err != nil {
-		return Expense{}, fmt.Errorf("failed to read storage file: %v", err)
+		return Expense{}, err
 	}
-	for i, exp := range data.Expenses {
+	for _, exp := range d.Expenses {
 		if exp.ID == id {
-			log.Printf("Retrieved expense with ID %s\n", id)
-			return data.Expenses[i], nil
+			return exp, nil
 		}
 	}
-	return Expense{}, fmt.Errorf("expense with ID %s not found", id)
+	return Expense{}, ErrNotFound
 }
 
-func (s *jsonStore) AddExpense(expense Expense) error {
+func (s *jsonStore) AddExpense(userID string, expense Expense) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	data, err := s.readExpensesFile(s.filePath)
+	d, err := s.readExpenses(userID)
 	if err != nil {
-		return fmt.Errorf("failed to read storage file: %v", err)
+		return err
 	}
 	if expense.ID == "" {
 		expense.ID = uuid.New().String()
 	}
 	if expense.Currency == "" {
-		expense.Currency = s.defaults["currency"]
+		expense.Currency = s.defaultCurrency(userID)
 	}
 	if expense.Date.IsZero() {
 		expense.Date = time.Now()
 	}
-	data.Expenses = append(data.Expenses, expense)
-	log.Printf("Added expense with ID %s\n", expense.ID)
-	return s.writeExpensesFile(s.filePath, data)
+	d.Expenses = append(d.Expenses, expense)
+	return s.writeExpenses(userID, d)
 }
 
-func (s *jsonStore) RemoveExpense(id string) error {
+func (s *jsonStore) RemoveExpense(userID string, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	data, err := s.readExpensesFile(s.filePath)
+	d, err := s.readExpenses(userID)
 	if err != nil {
-		return fmt.Errorf("failed to read storage file: %v", err)
+		return err
 	}
 	found := false
-	newExpenses := make([]Expense, 0, len(data.Expenses)-1)
-	for _, exp := range data.Expenses {
-		if exp.ID != id {
-			newExpenses = append(newExpenses, exp)
-		} else {
+	out := make([]Expense, 0, len(d.Expenses))
+	for _, exp := range d.Expenses {
+		if exp.ID == id {
 			found = true
+			continue
 		}
+		out = append(out, exp)
 	}
 	if !found {
-		log.Printf("Expense with ID %s not found\n", id)
-		return fmt.Errorf("expense with ID %s not found", id)
+		return ErrNotFound
 	}
-	log.Printf("Deleted expense with ID %s\n", id)
-	data.Expenses = newExpenses
-	return s.writeExpensesFile(s.filePath, data)
+	d.Expenses = out
+	return s.writeExpenses(userID, d)
 }
 
-func (s *jsonStore) AddMultipleExpenses(expensesToAdd []Expense) error {
-	if len(expensesToAdd) == 0 {
-		return nil
-	}
-	data, err := s.readExpensesFile(s.filePath)
-	if err != nil {
-		return fmt.Errorf("failed to read storage file: %v", err)
-	}
-	data.Expenses = append(data.Expenses, expensesToAdd...)
-	log.Printf("Added %d new recurring expense instances\n", len(expensesToAdd))
-	return s.writeExpensesFile(s.filePath, data)
+func (s *jsonStore) AddMultipleExpenses(userID string, expenses []Expense) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.appendExpenses(userID, expenses)
 }
 
-func (s *jsonStore) RemoveMultipleExpenses(ids []string) error {
+func (s *jsonStore) RemoveMultipleExpenses(userID string, ids []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(ids) == 0 {
 		return nil
 	}
-	data, err := s.readExpensesFile(s.filePath)
+	d, err := s.readExpenses(userID)
 	if err != nil {
-		return fmt.Errorf("failed to read storage file: %v", err)
+		return err
 	}
-	idsToRemove := make(map[string]struct{}, len(ids))
+	remove := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
-		idsToRemove[id] = struct{}{}
+		remove[id] = struct{}{}
 	}
-	originalCount := len(data.Expenses)
-	newExpenses := make([]Expense, 0, originalCount)
-	for _, exp := range data.Expenses {
-		if _, found := idsToRemove[exp.ID]; !found {
-			newExpenses = append(newExpenses, exp)
+	out := make([]Expense, 0, len(d.Expenses))
+	for _, exp := range d.Expenses {
+		if _, drop := remove[exp.ID]; !drop {
+			out = append(out, exp)
 		}
 	}
-	if len(newExpenses) == originalCount {
-		log.Println("RemoveMultipleExpenses: no expenses found to remove")
-		return nil
-	}
-	log.Printf("Removed %d expenses\n", originalCount-len(newExpenses))
-	data.Expenses = newExpenses
-	return s.writeExpensesFile(s.filePath, data)
+	d.Expenses = out
+	return s.writeExpenses(userID, d)
 }
 
-func (s *jsonStore) UpdateExpense(id string, expense Expense) error {
+func (s *jsonStore) UpdateExpense(userID string, id string, expense Expense) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	data, err := s.readExpensesFile(s.filePath)
+	d, err := s.readExpenses(userID)
 	if err != nil {
-		return fmt.Errorf("failed to read storage file: %v", err)
+		return err
 	}
 	found := false
-	for i, exp := range data.Expenses {
+	for i, exp := range d.Expenses {
 		if exp.ID == id {
-			data.Expenses[i] = expense
-			data.Expenses[i].ID = id
-			if data.Expenses[i].Currency == "" {
-				data.Expenses[i].Currency = s.defaults["currency"]
+			expense.ID = id
+			if expense.Currency == "" {
+				expense.Currency = s.defaultCurrency(userID)
 			}
+			d.Expenses[i] = expense
 			found = true
 			break
 		}
 	}
 	if !found {
-		log.Printf("expense with ID %s not found\n", id)
-		return fmt.Errorf("expense with ID %s not found", id)
+		return ErrNotFound
 	}
-	log.Printf("Edited expense with ID %s\n", id)
-	return s.writeExpensesFile(s.filePath, data)
+	return s.writeExpenses(userID, d)
+}
+
+// slicesContains is a tiny local helper to avoid importing slices in this file.
+func slicesContains(haystack []string, needle string) bool {
+	for _, v := range haystack {
+		if v == needle {
+			return true
+		}
+	}
+	return false
 }
