@@ -8,19 +8,22 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tanq16/expenseowl/internal/auth"
 	"github.com/tanq16/expenseowl/internal/storage"
 	"github.com/tanq16/expenseowl/internal/web"
 )
 
-// Handler holds the storage interface
+// Handler holds the storage interface and the session store
 type Handler struct {
-	storage storage.Storage
+	storage  storage.Storage
+	sessions *auth.SessionStore
 }
 
 // NewHandler creates a new API handler
-func NewHandler(s storage.Storage) *Handler {
+func NewHandler(s storage.Storage, sessions *auth.SessionStore) *Handler {
 	return &Handler{
-		storage: s,
+		storage:  s,
+		sessions: sessions,
 	}
 }
 
@@ -75,6 +78,9 @@ func (h *Handler) UpdateCategories(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
+	if _, ok := h.requireAdmin(w, r); !ok {
+		return
+	}
 	var categories []string
 	if err := json.NewDecoder(r.Body).Decode(&categories); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})
@@ -117,6 +123,9 @@ func (h *Handler) UpdateCards(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
+	if _, ok := h.requireAdmin(w, r); !ok {
+		return
+	}
 	var cards []string
 	if err := json.NewDecoder(r.Body).Decode(&cards); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})
@@ -157,6 +166,9 @@ func (h *Handler) UpdateCurrency(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
+	if _, ok := h.requireAdmin(w, r); !ok {
+		return
+	}
 	var currency string
 	if err := json.NewDecoder(r.Body).Decode(&currency); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})
@@ -187,6 +199,9 @@ func (h *Handler) GetStartDate(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateStartDate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
+		return
+	}
+	if _, ok := h.requireAdmin(w, r); !ok {
 		return
 	}
 	var startDate int
@@ -223,6 +238,8 @@ func (h *Handler) AddExpense(w http.ResponseWriter, r *http.Request) {
 	if expense.Date.IsZero() {
 		expense.Date = time.Now()
 	}
+	user, _ := currentUser(r)
+	expense.UserID = user.ID
 	if err := h.storage.AddExpense(expense); err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to save expense"})
 		log.Printf("API ERROR: Failed to save expense: %v\n", err)
@@ -241,6 +258,16 @@ func (h *Handler) GetExpenses(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to retrieve expenses"})
 		log.Printf("API ERROR: Failed to retrieve expenses: %v\n", err)
 		return
+	}
+	user, _ := currentUser(r)
+	if !user.IsAdmin {
+		filtered := make([]storage.Expense, 0, len(expenses))
+		for _, e := range expenses {
+			if e.UserID == user.ID {
+				filtered = append(filtered, e)
+			}
+		}
+		expenses = filtered
 	}
 	writeJSON(w, http.StatusOK, expenses)
 }
@@ -264,6 +291,17 @@ func (h *Handler) EditExpense(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
+	existing, err := h.storage.GetExpense(id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "Expense not found"})
+		return
+	}
+	user, _ := currentUser(r)
+	if !user.IsAdmin && existing.UserID != user.ID {
+		writeJSON(w, http.StatusForbidden, ErrorResponse{Error: "You can only edit your own expenses"})
+		return
+	}
+	expense.UserID = existing.UserID // preserve ownership
 	if err := h.storage.UpdateExpense(id, expense); err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to edit expense"})
 		log.Printf("API ERROR: Failed to edit expense: %v\n", err)
@@ -280,6 +318,16 @@ func (h *Handler) DeleteExpense(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "ID parameter is required"})
+		return
+	}
+	existing, err := h.storage.GetExpense(id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "Expense not found"})
+		return
+	}
+	user, _ := currentUser(r)
+	if !user.IsAdmin && existing.UserID != user.ID {
+		writeJSON(w, http.StatusForbidden, ErrorResponse{Error: "You can only delete your own expenses"})
 		return
 	}
 	if err := h.storage.RemoveExpense(id); err != nil {
@@ -301,6 +349,16 @@ func (h *Handler) DeleteMultipleExpenses(w http.ResponseWriter, r *http.Request)
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})
 		return
+	}
+	user, _ := currentUser(r)
+	if !user.IsAdmin {
+		owned := make([]string, 0, len(payload.IDs))
+		for _, id := range payload.IDs {
+			if exp, err := h.storage.GetExpense(id); err == nil && exp.UserID == user.ID {
+				owned = append(owned, id)
+			}
+		}
+		payload.IDs = owned
 	}
 	if err := h.storage.RemoveMultipleExpenses(payload.IDs); err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to delete multiple expenses"})
@@ -328,6 +386,8 @@ func (h *Handler) AddRecurringExpense(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
+	user, _ := currentUser(r)
+	re.UserID = user.ID
 	if err := h.storage.AddRecurringExpense(re); err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to add recurring expense"})
 		log.Printf("API ERROR: Failed to add recurring expense: %v\n", err)
@@ -346,6 +406,16 @@ func (h *Handler) GetRecurringExpenses(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to get recurring expenses"})
 		log.Printf("API ERROR: Failed to get recurring expenses: %v\n", err)
 		return
+	}
+	user, _ := currentUser(r)
+	if !user.IsAdmin {
+		filtered := make([]storage.RecurringExpense, 0, len(res))
+		for _, re := range res {
+			if re.UserID == user.ID {
+				filtered = append(filtered, re)
+			}
+		}
+		res = filtered
 	}
 	writeJSON(w, http.StatusOK, res)
 }
@@ -371,6 +441,17 @@ func (h *Handler) UpdateRecurringExpense(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
+	existing, err := h.storage.GetRecurringExpense(id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "Recurring expense not found"})
+		return
+	}
+	user, _ := currentUser(r)
+	if !user.IsAdmin && existing.UserID != user.ID {
+		writeJSON(w, http.StatusForbidden, ErrorResponse{Error: "You can only edit your own recurring expenses"})
+		return
+	}
+	re.UserID = existing.UserID // preserve ownership
 	if err := h.storage.UpdateRecurringExpense(id, re, updateAll); err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to update recurring expense"})
 		log.Printf("API ERROR: Failed to update recurring expense: %v\n", err)
@@ -391,6 +472,16 @@ func (h *Handler) DeleteRecurringExpense(w http.ResponseWriter, r *http.Request)
 	}
 	removeAll, _ := strconv.ParseBool(r.URL.Query().Get("removeAll"))
 
+	existing, err := h.storage.GetRecurringExpense(id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "Recurring expense not found"})
+		return
+	}
+	user, _ := currentUser(r)
+	if !user.IsAdmin && existing.UserID != user.ID {
+		writeJSON(w, http.StatusForbidden, ErrorResponse{Error: "You can only delete your own recurring expenses"})
+		return
+	}
 	if err := h.storage.RemoveRecurringExpense(id, removeAll); err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to delete recurring expense"})
 		log.Printf("API ERROR: Failed to delete recurring expense: %v\n", err)

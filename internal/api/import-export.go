@@ -26,6 +26,16 @@ func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 		log.Printf("API ERROR: Failed to retrieve expenses for CSV export: %v\n", err)
 		return
 	}
+	user, _ := currentUser(r)
+	if !user.IsAdmin {
+		filtered := make([]storage.Expense, 0, len(expenses))
+		for _, e := range expenses {
+			if e.UserID == user.ID {
+				filtered = append(filtered, e)
+			}
+		}
+		expenses = filtered
+	}
 	w.Header().Set("Content-Type", "text/csv")
 	w.Header().Set("Content-Disposition", "attachment; filename=expenses.csv")
 	writer := csv.NewWriter(w)
@@ -64,6 +74,7 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
+	importUser, _ := currentUser(r)
 	if err := r.ParseMultipartForm(10 << 20); err != nil { // 10MB max file size
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Could not parse multipart form"})
 		return
@@ -186,6 +197,7 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 		}
 
 		expense := storage.Expense{
+			UserID:   importUser.ID,
 			Name:     strings.TrimSpace(record[colMap["name"]]),
 			Category: category,
 			Card:     card,
@@ -230,6 +242,7 @@ func (h *Handler) ImportOldCSV(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
+	importUser, _ := currentUser(r)
 	if err := r.ParseMultipartForm(10 << 20); err != nil { // 10MB max file size
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Could not parse multipart form"})
 		return
@@ -303,6 +316,7 @@ func (h *Handler) ImportOldCSV(w http.ResponseWriter, r *http.Request) {
 		// all imported rows are expenses, stored as negative amounts
 		amountUpdated := -math.Abs(amount)
 		expense := storage.Expense{
+			UserID:   importUser.ID,
 			Name:     strings.TrimSpace(record[colMap["name"]]),
 			Category: category,
 			Amount:   amountUpdated,

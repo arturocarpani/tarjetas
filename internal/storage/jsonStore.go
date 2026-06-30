@@ -17,7 +17,9 @@ import (
 type jsonStore struct {
 	configPath string
 	filePath   string
+	usersPath  string
 	mu         sync.RWMutex
+	usersMu    sync.RWMutex
 	defaults   map[string]string // allows reusing defaults without querying for config
 }
 
@@ -25,9 +27,14 @@ type expensesFileData struct {
 	Expenses []Expense `json:"expenses"`
 }
 
+type usersFileData struct {
+	Users []User `json:"users"`
+}
+
 func InitializeJsonStore(baseConfig SystemConfig) (*jsonStore, error) {
 	configPath := filepath.Join(baseConfig.StorageURL, "config.json")
 	filePath := filepath.Join(baseConfig.StorageURL, "expenses.json")
+	usersPath := filepath.Join(baseConfig.StorageURL, "users.json")
 	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
 		return nil, fmt.Errorf("failed to create storage directory: %v", err)
 	}
@@ -63,11 +70,161 @@ func InitializeJsonStore(baseConfig SystemConfig) (*jsonStore, error) {
 		log.Println("Found existing expense storage config")
 	}
 
+	// create users file if it doesn't exist
+	if _, err := os.Stat(usersPath); os.IsNotExist(err) {
+		data, err := json.Marshal(usersFileData{Users: []User{}})
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal initial users data: %v", err)
+		}
+		if err := os.WriteFile(usersPath, data, 0644); err != nil {
+			return nil, fmt.Errorf("failed to create users file: %v", err)
+		}
+		log.Println("Created users storage file")
+	} else {
+		log.Println("Found existing users storage file")
+	}
+
 	return &jsonStore{
 		configPath: configPath,
 		filePath:   filePath,
+		usersPath:  usersPath,
 		defaults:   map[string]string{},
 	}, nil
+}
+
+// ------------------------------------------------------------
+// Users
+// ------------------------------------------------------------
+
+func (s *jsonStore) readUsersFile() (*usersFileData, error) {
+	content, err := os.ReadFile(s.usersPath)
+	if err != nil {
+		return nil, err
+	}
+	var data usersFileData
+	if err := json.Unmarshal(content, &data); err != nil {
+		return nil, err
+	}
+	return &data, nil
+}
+
+func (s *jsonStore) writeUsersFile(data *usersFileData) error {
+	content, err := json.MarshalIndent(data, "", "    ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.usersPath, content, 0644)
+}
+
+func (s *jsonStore) CreateUser(user User) error {
+	s.usersMu.Lock()
+	defer s.usersMu.Unlock()
+	data, err := s.readUsersFile()
+	if err != nil {
+		return fmt.Errorf("failed to read users file: %v", err)
+	}
+	for _, u := range data.Users {
+		if u.Username == user.Username {
+			return fmt.Errorf("username '%s' already exists", user.Username)
+		}
+	}
+	if user.ID == "" {
+		user.ID = uuid.New().String()
+	}
+	if user.CreatedAt.IsZero() {
+		user.CreatedAt = time.Now()
+	}
+	data.Users = append(data.Users, user)
+	return s.writeUsersFile(data)
+}
+
+func (s *jsonStore) GetUserByUsername(username string) (User, error) {
+	s.usersMu.RLock()
+	defer s.usersMu.RUnlock()
+	data, err := s.readUsersFile()
+	if err != nil {
+		return User{}, err
+	}
+	for _, u := range data.Users {
+		if u.Username == username {
+			return u, nil
+		}
+	}
+	return User{}, fmt.Errorf("user '%s' not found", username)
+}
+
+func (s *jsonStore) GetUserByID(id string) (User, error) {
+	s.usersMu.RLock()
+	defer s.usersMu.RUnlock()
+	data, err := s.readUsersFile()
+	if err != nil {
+		return User{}, err
+	}
+	for _, u := range data.Users {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+	return User{}, fmt.Errorf("user with ID %s not found", id)
+}
+
+func (s *jsonStore) ListUsers() ([]User, error) {
+	s.usersMu.RLock()
+	defer s.usersMu.RUnlock()
+	data, err := s.readUsersFile()
+	if err != nil {
+		return nil, err
+	}
+	return data.Users, nil
+}
+
+func (s *jsonStore) UpdateUserPassword(id, passwordHash string) error {
+	s.usersMu.Lock()
+	defer s.usersMu.Unlock()
+	data, err := s.readUsersFile()
+	if err != nil {
+		return err
+	}
+	for i := range data.Users {
+		if data.Users[i].ID == id {
+			data.Users[i].PasswordHash = passwordHash
+			return s.writeUsersFile(data)
+		}
+	}
+	return fmt.Errorf("user with ID %s not found", id)
+}
+
+func (s *jsonStore) DeleteUser(id string) error {
+	s.usersMu.Lock()
+	defer s.usersMu.Unlock()
+	data, err := s.readUsersFile()
+	if err != nil {
+		return err
+	}
+	found := false
+	updated := make([]User, 0, len(data.Users))
+	for _, u := range data.Users {
+		if u.ID == id {
+			found = true
+		} else {
+			updated = append(updated, u)
+		}
+	}
+	if !found {
+		return fmt.Errorf("user with ID %s not found", id)
+	}
+	data.Users = updated
+	return s.writeUsersFile(data)
+}
+
+func (s *jsonStore) CountUsers() (int, error) {
+	s.usersMu.RLock()
+	defer s.usersMu.RUnlock()
+	data, err := s.readUsersFile()
+	if err != nil {
+		return 0, err
+	}
+	return len(data.Users), nil
 }
 
 // primitive methods

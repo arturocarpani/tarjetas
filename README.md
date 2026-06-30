@@ -31,7 +31,7 @@ So, I created this project and I use it in my home lab for expenses. The primary
 ### Core Functionality
 
 - Quick expense add (only date, amount, and category are required)
-- Single-user focused (mainly for a home lab deployment)
+- Multi-user: each user logs in and sees only their own expenses; an admin role sees everyone's and manages users
 - Recurring expenses
 - Custom categories, currency symbols, and start date via app settings
 - Optional tags for further classification
@@ -172,6 +172,23 @@ With the exception of [Data backends](#data-backends), all configuration of Expe
   - Recurring transactions allow similar options as normal expenses - category, tags, amount, name
 - Theme Settings: supports light and dark theme, with default behavior to adapt to system
 - Import/Export Data: covered under [Data Import/Export](#data-importexport)
+- User Management (admin only): create users, reset passwords, and delete users from the settings page
+
+### Authentication
+
+ExpenseOwl requires a login. Each user sees and edits only their own expenses; an
+**admin** sees everyone's expenses and manages users (category/card/currency/start-date
+settings are shared and admin-only to edit).
+
+On first run, if no users exist, an initial admin is created from these environment
+variables (both optional):
+
+| Variable | Sample Value | Details |
+| --- | --- | --- |
+| ADMIN_USERNAME | admin | username for the bootstrap admin (defaults to `admin`) |
+| ADMIN_PASSWORD | a-strong-secret | password for the bootstrap admin (defaults to `admin` — **change it immediately**) |
+
+Sessions are kept in memory (cookie-based), so a restart requires logging in again.
 
 ### Data Backends
 
