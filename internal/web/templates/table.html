@@ -99,11 +99,6 @@
                     </script>
                 </div>
                 
-                <div class="form-group form-group-checkbox">
-                    <label for="reportGain">Report Gain</label>
-                    <input type="checkbox" id="reportGain" class="styled-checkbox">
-                </div>
-
                 <button type="submit" class="nav-button">Add Expense</button>
             </form>
             <div id="formMessage" class="form-message"></div>
@@ -242,12 +237,10 @@
         }
 
         function editExpense(id, name, category, amount, tags, date, card) {
-            const isGain = amount > 0;
             document.getElementById('name').value = name;
             document.getElementById('category').value = category;
             document.getElementById('card').value = card || '';
             document.getElementById('amount').value = Math.abs(amount);
-            document.getElementById('reportGain').checked = isGain;
             renderSelectedTags(tags);
             
             const localDate = new Date(date);
@@ -440,11 +433,7 @@
             e.preventDefault();
             const form = e.target;
             const editId = form.dataset.editId;
-            const isGain = document.getElementById('reportGain').checked;
-            let amount = parseFloat(document.getElementById('amount').value);
-            if (!isGain) {
-                amount *= -1;
-            }
+            const amount = -Math.abs(parseFloat(document.getElementById('amount').value));
 
             const formData = {
                 name: document.getElementById('name').value,

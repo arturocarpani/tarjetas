@@ -111,11 +111,6 @@
                         </script>
                     </div>
                     
-                    <div class="form-group form-group-checkbox">
-                        <label for="reportGain">Report Gain</label>
-                        <input type="checkbox" id="reportGain" class="styled-checkbox">
-                    </div>
-    
                     <button type="submit" class="nav-button">Add Expense</button>
                 </form>
                 <div id="formMessage" class="form-message"></div>
@@ -132,17 +127,9 @@
         </div>
 
         <div id="cashflow-section" class="cashflow-container">
-            <div class="cashflow-item income">
-                <div class="cashflow-label">Income</div>
-                <div class="cashflow-value" id="cashflow-income"></div>
-            </div>
             <div class="cashflow-item expenses">
-                <div class="cashflow-label">Expenses</div>
+                <div class="cashflow-label">Total del mes</div>
                 <div class="cashflow-value" id="cashflow-expenses"></div>
-            </div>
-            <div class="cashflow-item balance">
-                <div class="cashflow-label">Balance</div>
-                <div class="cashflow-value" id="cashflow-balance"></div>
             </div>
         </div>
 
@@ -213,12 +200,6 @@
                 .sort((a, b) => b.total - a.total);
         }
 
-        function calculateIncome(expenses) {
-            return expenses
-                .filter(exp => exp.amount > 0)
-                .reduce((sum, exp) => sum + exp.amount, 0);
-        }
-
         function calculateExpenses(expenses) {
             return expenses
                 .filter(exp => exp.amount < 0)
@@ -286,22 +267,8 @@
         }
 
         function updateCashflow(expenses) {
-            const income = calculateIncome(expenses);
             const expenseTotal = calculateExpenses(expenses);
-            const balance = income - expenseTotal;
-            
-            document.getElementById('cashflow-income').textContent = formatCurrency(income);
             document.getElementById('cashflow-expenses').textContent = formatCurrency(expenseTotal);
-            document.getElementById('cashflow-balance').textContent = formatCurrency(balance);
-            
-            const balanceElement = document.getElementById('cashflow-balance');
-            if (balance >= 0) {
-                balanceElement.classList.add('positive');
-                balanceElement.classList.remove('negative');
-            } else {
-                balanceElement.classList.add('negative');
-                balanceElement.classList.remove('positive');
-            }
         }
 
         function createPieChart(categoryData) {
@@ -553,11 +520,7 @@
 
         document.getElementById('expenseForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const isGain = document.getElementById('reportGain').checked;
-            let amount = parseFloat(document.getElementById('amount').value);
-            if (!isGain) {
-                amount *= -1;
-            }
+            const amount = -Math.abs(parseFloat(document.getElementById('amount').value));
             const formData = {
                 name: document.getElementById('name').value,
                 category: document.getElementById('category').value,

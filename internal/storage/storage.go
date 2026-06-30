@@ -252,7 +252,6 @@ var defaultCategories = []string{
 	"Healthcare",
 	"Shopping",
 	"Miscellaneous",
-	"Income",
 }
 
 var SupportedCurrencies = []string{

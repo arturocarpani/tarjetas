@@ -30,9 +30,9 @@ So, I created this project and I use it in my home lab for expenses. The primary
 
 ### Core Functionality
 
-- Quick expense/income add (only date, amount, and category are required)
+- Quick expense add (only date, amount, and category are required)
 - Single-user focused (mainly for a home lab deployment)
-- Recurring transactions for both income and expenses
+- Recurring expenses
 - Custom categories, currency symbols, and start date via app settings
 - Optional tags for further classification
 - Beautiful interface with both light and dark themes
@@ -45,7 +45,7 @@ So, I created this project and I use it in my home lab for expenses. The primary
 1. Main dashboard - category breakdown (pie chart) and cashflow indicator
     - Click on a category to exclude it from the pie chart; click again to add it back
     - Visualize the month's breakdown without considering some categories like Rent
-    - Cashflow shows total income, total expenses, and balance (red or green based on +ve or -ve)
+    - Shows the month's total spending
 2. Table view for detailed expense listing
     - View monthly or all expenses chronologically and delete them (hold shift to skip confirm)
     - Use the browser to search for a name or tags if needed
@@ -145,7 +145,7 @@ Once deployed, use the web interface to do everything. Access it through your br
 
 Since writing the app, I've found a ton of ways applications handle expenses. Release v4.0 solidifies the conventions I will continue to maintain the app in.
 
-- Expenses are categorized by a -ve value, while income or reimbursement (designated by the `Report as gain` checkbox) are +ve
+- Expenses are stored as -ve values
 - Expense dates are stored as UTC strings in RFC3339 format, however, the frontend hides the time value from the user; users are meant to select a date, and the current local time is automatically added to the given date
 - Future and recurring expenses extending into future dates are added immediately to the backend
 - The primary way to use ExpenseOwl is to quick review the month's stats via the pie chart - this allows users to make a mental note and soft decision of where to spend money, without the effort of maintaining a budget
@@ -167,8 +167,7 @@ With the exception of [Data backends](#data-backends), all configuration of Expe
   - This is a custom day of the month from when the expenses will be displayed
   - Example: setting it to 5 means, expenses for each month will be counted from 5th to next month's 4th
 - Recurring Transactions:
-  - A recurring transaction can be for an expense or an income (gain)
-  - Given a value for number of occurences and a start date, the app will add the transactions accordingly
+  - Given a value for number of occurences and a start date, the app will add the expenses accordingly
   - Recurring transactions will be listed at the bottom of the page and can be edited/removed (all or future only transactions)
   - Recurring transactions allow similar options as normal expenses - category, tags, amount, name
 - Theme Settings: supports light and dark theme, with default behavior to adapt to system

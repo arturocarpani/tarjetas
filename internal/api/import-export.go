@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"slices"
 	"strconv"
@@ -299,11 +300,8 @@ func (h *Handler) ImportOldCSV(w http.ResponseWriter, r *http.Request) {
 			categorySet[strings.ToLower(category)] = true // Add to set to handle duplicates in the same file
 		}
 
-		// switches sign for new expenseowl
-		amountUpdated := amount
-		if category != "Income" {
-			amountUpdated = amount * -1
-		}
+		// all imported rows are expenses, stored as negative amounts
+		amountUpdated := -math.Abs(amount)
 		expense := storage.Expense{
 			Name:     strings.TrimSpace(record[colMap["name"]]),
 			Category: category,
