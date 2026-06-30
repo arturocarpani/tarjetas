@@ -57,6 +57,8 @@
 
         <div class="table-controls">
             <button id="toggleExpenseFormBtn" class="nav-button"><i class="fa-solid fa-plus"></i> Add Expense</button>
+            <button id="scanReceiptBtn" type="button" class="nav-button">📷 Escanear ticket</button>
+            <input type="file" id="receiptInput" accept="image/*" capture="environment" style="display: none;">
             <select id="cardFilter" class="nav-button">
                 <option value="">Todas las tarjetas</option>
             </select>
@@ -548,6 +550,102 @@
             } else {
                 formContainer.style.display = 'none';
                 this.innerHTML = '<i class="fa-solid fa-plus"></i> Add Expense';
+            }
+        });
+
+        function openExpenseForm() {
+            const formContainer = document.getElementById('addExpenseContainer');
+            const toggleBtn = document.getElementById('toggleExpenseFormBtn');
+            const isHidden = formContainer.style.display === 'none' || formContainer.style.display === '';
+            if (isHidden) {
+                formContainer.style.display = 'block';
+                toggleBtn.innerHTML = '<i class="fa-solid fa-times"></i> Close';
+            }
+        }
+
+        function prefillExpenseFormFromDraft(draft) {
+            openExpenseForm();
+
+            const nameInput = document.getElementById('name');
+            const nameValue = (draft.name && draft.name.trim()) ? draft.name : (draft.merchant || '');
+            if (nameValue) nameInput.value = nameValue;
+
+            const amountInput = document.getElementById('amount');
+            const amountNumber = Math.abs(parseFloat(draft.amount));
+            if (!isNaN(amountNumber) && amountNumber > 0) {
+                amountInput.value = amountNumber;
+            }
+
+            if (draft.category) {
+                const categorySelect = document.getElementById('category');
+                const match = Array.from(categorySelect.options).find(opt =>
+                    opt.value.toLowerCase() === draft.category.toLowerCase());
+                if (match) categorySelect.value = match.value;
+            }
+
+            if (draft.card) {
+                const cardSelect = document.getElementById('card');
+                const match = Array.from(cardSelect.options).find(opt =>
+                    opt.value.toLowerCase() === draft.card.toLowerCase());
+                if (match) cardSelect.value = match.value;
+            }
+
+            if (draft.date) {
+                document.getElementById('date').value = draft.date;
+            }
+
+            const messageDiv = document.getElementById('formMessage');
+            if (draft.confidence === 'low') {
+                messageDiv.textContent = 'Revisá los datos: confianza baja';
+                messageDiv.className = 'form-message';
+            }
+
+            const focusInput = nameValue ? amountInput : nameInput;
+            focusInput.focus();
+        }
+
+        document.getElementById('scanReceiptBtn').addEventListener('click', () => {
+            document.getElementById('receiptInput').click();
+        });
+
+        document.getElementById('receiptInput').addEventListener('change', async (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+            const scanBtn = document.getElementById('scanReceiptBtn');
+            const originalText = scanBtn.innerHTML;
+            const messageDiv = document.getElementById('formMessage');
+            scanBtn.disabled = true;
+            scanBtn.textContent = 'Analizando…';
+            try {
+                const formData = new FormData();
+                formData.append('image', file);
+                const response = await fetch('/expense/scan', {
+                    method: 'POST',
+                    body: formData
+                });
+                if (response.ok) {
+                    const draft = await response.json();
+                    prefillExpenseFormFromDraft(draft);
+                } else if (response.status === 503) {
+                    messageDiv.textContent = 'El escaneo con IA no está configurado en el servidor.';
+                    messageDiv.className = 'form-message error';
+                } else {
+                    let errorMsg = 'No se pudo analizar el ticket';
+                    try {
+                        const error = await response.json();
+                        if (error && error.error) errorMsg = error.error;
+                    } catch (parseError) {}
+                    messageDiv.textContent = `Error: ${errorMsg}`;
+                    messageDiv.className = 'form-message error';
+                }
+            } catch (error) {
+                console.error('Error scanning receipt:', error);
+                messageDiv.textContent = 'Error: No se pudo analizar el ticket';
+                messageDiv.className = 'form-message error';
+            } finally {
+                scanBtn.disabled = false;
+                scanBtn.innerHTML = originalText;
+                e.target.value = '';
             }
         });
 

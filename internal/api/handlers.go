@@ -12,19 +12,30 @@ import (
 	"github.com/tanq16/expenseowl/internal/ai"
 	"github.com/tanq16/expenseowl/internal/auth"
 	"github.com/tanq16/expenseowl/internal/storage"
+	"github.com/tanq16/expenseowl/internal/telegram"
 	"github.com/tanq16/expenseowl/internal/web"
 )
 
-// Handler holds the storage interface, the auth manager, and the AI scanner.
+// Handler holds the storage interface, the auth manager, the AI scanner, and
+// (optionally) the Telegram link store + bot for account linking.
 type Handler struct {
 	storage storage.Storage
 	auth    *auth.Manager
 	scanner *ai.Scanner
+	tgBot   *telegram.Bot
+	tgLinks *telegram.LinkStore
 }
 
 // NewHandler creates a new API handler
 func NewHandler(s storage.Storage, a *auth.Manager, sc *ai.Scanner) *Handler {
 	return &Handler{storage: s, auth: a, scanner: sc}
+}
+
+// SetTelegram wires the Telegram bot + link store (called from main when a
+// TELEGRAM_BOT_TOKEN is configured).
+func (h *Handler) SetTelegram(bot *telegram.Bot, links *telegram.LinkStore) {
+	h.tgBot = bot
+	h.tgLinks = links
 }
 
 // ErrorResponse is a generic JSON error response

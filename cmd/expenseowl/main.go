@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"flag"
@@ -15,6 +16,7 @@ import (
 	"github.com/tanq16/expenseowl/internal/api"
 	"github.com/tanq16/expenseowl/internal/auth"
 	"github.com/tanq16/expenseowl/internal/storage"
+	"github.com/tanq16/expenseowl/internal/telegram"
 	"github.com/tanq16/expenseowl/internal/web"
 )
 
@@ -38,6 +40,16 @@ func runServer(port int) {
 		log.Println("AI receipt scanning disabled (set ANTHROPIC_API_KEY to enable)")
 	}
 	handler := api.NewHandler(store, authMgr, scanner)
+
+	// Telegram bot (optional): enabled when TELEGRAM_BOT_TOKEN is set.
+	if token := os.Getenv("TELEGRAM_BOT_TOKEN"); token != "" {
+		links := telegram.NewLinkStore()
+		bot := telegram.New(token, store, scanner, links)
+		handler.SetTelegram(bot, links)
+		bot.Start(context.Background())
+	} else {
+		log.Println("Telegram bot disabled (set TELEGRAM_BOT_TOKEN to enable)")
+	}
 
 	// ---- public mux: reachable without a session -------------------------
 	public := http.NewServeMux()
@@ -85,6 +97,7 @@ func runServer(port int) {
 	protected.HandleFunc("/users", handler.Users)
 	protected.HandleFunc("/users/delete", handler.DeleteUser)
 	protected.HandleFunc("/users/password", handler.ResetPassword)
+	protected.HandleFunc("/telegram/link", handler.TelegramLink)
 
 	// config
 	protected.HandleFunc("/config", handler.GetConfig)
