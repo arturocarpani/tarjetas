@@ -56,7 +56,13 @@ func setupTelegram(handler *api.Handler) {
 		log.Println("Telegram bot disabled (set TELEGRAM_BOT_TOKEN and ANTHROPIC_API_KEY to enable)")
 		return
 	}
+	// The webhook route is public, so a secret is mandatory — without it anyone
+	// could POST forged expense updates. Refuse to enable the bot without one.
 	secret := os.Getenv("TELEGRAM_WEBHOOK_SECRET")
+	if secret == "" {
+		log.Println("Telegram bot disabled: set TELEGRAM_WEBHOOK_SECRET (required to secure the public webhook)")
+		return
+	}
 	client := telegram.NewClient(token)
 	handler.EnableTelegram(client, ai.NewExtractor(), secret)
 	log.Println("Telegram bot enabled")

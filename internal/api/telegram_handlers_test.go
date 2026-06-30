@@ -57,6 +57,17 @@ func TestTelegramWebhookAcceptsValidSecret(t *testing.T) {
 	}
 }
 
+func TestTelegramWebhookRejectsEmptySecret(t *testing.T) {
+	// An empty configured secret must reject everything (the route is public).
+	h := newTelegramHandler(t, "")
+	req := httptest.NewRequest(http.MethodPost, "/telegram/webhook", strings.NewReader("{}"))
+	rec := httptest.NewRecorder()
+	h.TelegramWebhook(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 when no secret is configured", rec.Code)
+	}
+}
+
 func TestGetUserByTelegramIDRoundTrip(t *testing.T) {
 	s, err := storage.InitializeJsonStore(storage.SystemConfig{StorageURL: t.TempDir()})
 	if err != nil {

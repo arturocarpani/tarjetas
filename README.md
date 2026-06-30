@@ -197,19 +197,21 @@ ExpenseOwl can run an optional Telegram bot that reads an expense from a text me
 with vision for photos) to extract the name, amount, category, card, date, and tags, then
 saves the expense through the same path as the web UI.
 
-The bot is enabled only when both `TELEGRAM_BOT_TOKEN` and `ANTHROPIC_API_KEY` are set;
-otherwise the app logs `Telegram bot disabled` and runs normally.
+The bot is enabled only when `TELEGRAM_BOT_TOKEN`, `ANTHROPIC_API_KEY`, **and**
+`TELEGRAM_WEBHOOK_SECRET` are all set; otherwise the app logs `Telegram bot disabled` and
+runs normally. The secret is required because the webhook route is public — without it,
+anyone could POST forged expense updates.
 
 | Variable | Sample Value | Details |
 | --- | --- | --- |
 | TELEGRAM_BOT_TOKEN | 123456:ABC-... | bot token from [@BotFather](https://t.me/BotFather) |
 | ANTHROPIC_API_KEY | sk-ant-... | required for the AI extraction |
-| TELEGRAM_WEBHOOK_SECRET | a-random-string | optional; sent as the `X-Telegram-Bot-Api-Secret-Token` header so only Telegram can post to the webhook |
+| TELEGRAM_WEBHOOK_SECRET | a-random-string | **required**; sent as the `X-Telegram-Bot-Api-Secret-Token` header so only Telegram can post to the webhook |
 
 Setup:
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token into `TELEGRAM_BOT_TOKEN`.
-2. Set `ANTHROPIC_API_KEY` (and optionally a random `TELEGRAM_WEBHOOK_SECRET`).
+2. Set `ANTHROPIC_API_KEY` and a random `TELEGRAM_WEBHOOK_SECRET` (e.g. `openssl rand -hex 16`).
 3. Deploy. On startup the app registers the webhook automatically at
    `https://<RAILWAY_PUBLIC_DOMAIN>/telegram/webhook` (if `RAILWAY_PUBLIC_DOMAIN` is set;
    otherwise register it manually).

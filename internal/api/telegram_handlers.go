@@ -38,7 +38,10 @@ func (h *Handler) TelegramWebhook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
-	if h.webhookSecret != "" && r.Header.Get("X-Telegram-Bot-Api-Secret-Token") != h.webhookSecret {
+	// A secret is mandatory: the route is public, so without a matching
+	// X-Telegram-Bot-Api-Secret-Token header anyone could POST a forged update
+	// for a linked chat.id. An empty configured secret rejects everything.
+	if h.webhookSecret == "" || r.Header.Get("X-Telegram-Bot-Api-Secret-Token") != h.webhookSecret {
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "Invalid secret token"})
 		return
 	}

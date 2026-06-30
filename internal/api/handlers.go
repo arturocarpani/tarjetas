@@ -63,6 +63,17 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		log.Printf("API ERROR: Failed to get config: %v\n", err)
 		return
 	}
+	// Config carries everyone's recurring expenses; non-admins must only see
+	// their own (same scoping as GetRecurringExpenses).
+	if user, _ := currentUser(r); !user.IsAdmin {
+		filtered := make([]storage.RecurringExpense, 0, len(config.RecurringExpenses))
+		for _, re := range config.RecurringExpenses {
+			if re.UserID == user.ID {
+				filtered = append(filtered, re)
+			}
+		}
+		config.RecurringExpenses = filtered
+	}
 	writeJSON(w, http.StatusOK, config)
 }
 

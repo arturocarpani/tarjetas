@@ -169,6 +169,16 @@ func (h *Handler) createUser(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to hash password"})
 		return
 	}
+	req.TelegramID = strings.TrimSpace(req.TelegramID)
+	// CreateUser only enforces username uniqueness, so guard the Telegram ID here
+	// (same invariant as UpdateUserTelegramID) — two users sharing a chat.id would
+	// make GetUserByTelegramID ambiguous for the bot.
+	if req.TelegramID != "" {
+		if _, err := h.storage.GetUserByTelegramID(req.TelegramID); err == nil {
+			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Telegram ID is already linked to another user"})
+			return
+		}
+	}
 	user := storage.User{Username: req.Username, PasswordHash: hash, IsAdmin: req.IsAdmin, TelegramID: req.TelegramID}
 	if err := h.storage.CreateUser(user); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
