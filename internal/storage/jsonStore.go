@@ -151,6 +151,25 @@ func (s *jsonStore) UpdateCategories(categories []string) error {
 	return s.writeConfigFile(s.configPath, data)
 }
 
+func (s *jsonStore) GetCards() ([]string, error) {
+	config, err := s.GetConfig()
+	if err != nil {
+		return nil, err
+	}
+	return config.Cards, nil
+}
+
+func (s *jsonStore) UpdateCards(cards []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, err := s.readConfigFile(s.configPath)
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %v", err)
+	}
+	data.Cards = cards
+	return s.writeConfigFile(s.configPath, data)
+}
+
 func (s *jsonStore) GetCurrency() (string, error) {
 	config, err := s.GetConfig()
 	if err != nil {

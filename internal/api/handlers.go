@@ -98,6 +98,46 @@ func (h *Handler) UpdateCategories(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
 }
 
+func (h *Handler) GetCards(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
+		return
+	}
+	cards, err := h.storage.GetCards()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to get cards"})
+		log.Printf("API ERROR: Failed to get cards: %v\n", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, cards)
+}
+
+func (h *Handler) UpdateCards(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
+		return
+	}
+	var cards []string
+	if err := json.NewDecoder(r.Body).Decode(&cards); err != nil {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})
+		return
+	}
+	// Cards are optional/free-form; sanitize each and drop empties (an empty list
+	// is valid — it just means the user has no cards configured).
+	var sanitizedCards []string
+	for _, card := range cards {
+		if sanitized := storage.SanitizeString(card); sanitized != "" {
+			sanitizedCards = append(sanitizedCards, sanitized)
+		}
+	}
+	if err := h.storage.UpdateCards(sanitizedCards); err != nil {
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to update cards"})
+		log.Printf("API ERROR: Failed to update cards: %v\n", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
+}
+
 func (h *Handler) GetCurrency(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})

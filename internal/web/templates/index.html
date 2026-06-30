@@ -57,6 +57,9 @@
 
         <div class="table-controls">
             <button id="toggleExpenseFormBtn" class="nav-button"><i class="fa-solid fa-plus"></i> Add Expense</button>
+            <select id="cardFilter" class="nav-button">
+                <option value="">Todas las tarjetas</option>
+            </select>
         </div>
 
         <div id="addExpenseContainer" style="display: none;">
@@ -73,7 +76,14 @@
                             <option value="">categories</option>
                         </select>
                     </div>
-    
+
+                    <div class="form-group">
+                        <label for="card">Tarjeta</label>
+                        <select id="card">
+                            <option value="">(sin tarjeta)</option>
+                        </select>
+                    </div>
+
                     <div class="form-group">
                         <label for="tags-input">Tags</label>
                         <div id="tags-input-container" class="tags-input-container">
@@ -135,6 +145,11 @@
                 <div class="cashflow-value" id="cashflow-balance"></div>
             </div>
         </div>
+
+        <div id="card-breakdown-section" class="legend-box" style="display: none;">
+            <h3>Gasto por tarjeta</h3>
+            <div id="card-breakdown-list"></div>
+        </div>
     </div>
 
     <script src="/functions.js"></script>
@@ -148,6 +163,28 @@
         let categoryColors = {};
         let allTags = new Set();
         let selectedTags = new Set();
+        let loadedCards = [];
+        let currentCardFilter = "";
+
+        function populateCardControls() {
+            const cardSelect = document.getElementById('card');
+            cardSelect.innerHTML = '<option value="">(sin tarjeta)</option>' +
+                loadedCards.map(card =>
+                    `<option value="${card}">${card}</option>`
+                ).join('');
+
+            const cardFilter = document.getElementById('cardFilter');
+            cardFilter.innerHTML = '<option value="">Todas las tarjetas</option>' +
+                loadedCards.map(card =>
+                    `<option value="${card}">${card}</option>`
+                ).join('') +
+                '<option value="__none__">(sin tarjeta)</option>';
+            cardFilter.value = currentCardFilter;
+        }
+
+        function passesCardFilter(exp) {
+            return currentCardFilter === "" || (currentCardFilter === "__none__" ? !exp.card : exp.card === currentCardFilter);
+        }
 
         function assignCategoryColors(categories) {
             categories.forEach((category, index) => {
@@ -189,7 +226,8 @@
         }
 
         function updateChartAndLegend() {
-            const monthExpenses = getMonthExpenses(allExpenses);
+            const allMonthExpenses = getMonthExpenses(allExpenses);
+            const monthExpenses = allMonthExpenses.filter(passesCardFilter);
             const chartBox = document.querySelector('.chart-box');
             const legendBox = document.getElementById('customLegend');
             const cashflowSection = document.getElementById('cashflow-section');
@@ -209,12 +247,42 @@
                 legendBox.style.display = 'flex';
                 cashflowSection.style.display = 'flex';
                 noDataMessage.style.display = 'none';
-                
+
                 const categoryData = calculateCategoryBreakdown(monthExpenses);
                 updateCashflow(monthExpenses);
                 createPieChart(categoryData);
                 updateLegend(categoryData);
             }
+            updateCardBreakdown(allMonthExpenses);
+        }
+
+        function updateCardBreakdown(expenses) {
+            const section = document.getElementById('card-breakdown-section');
+            const list = document.getElementById('card-breakdown-list');
+            const cardTotals = {};
+            expenses.forEach(exp => {
+                if (exp.amount < 0) {
+                    const cardName = exp.card || '(sin tarjeta)';
+                    cardTotals[cardName] = (cardTotals[cardName] || 0) + Math.abs(exp.amount);
+                }
+            });
+            const rows = Object.entries(cardTotals)
+                .map(([card, total]) => ({ card, total }))
+                .sort((a, b) => b.total - a.total);
+            if (rows.length === 0) {
+                section.style.display = 'none';
+                list.innerHTML = '';
+                return;
+            }
+            section.style.display = 'flex';
+            list.innerHTML = rows.map(row => `
+                <div class="legend-item">
+                    <div class="legend-text">
+                        <span>${row.card}</span>
+                        <span class="amount">${formatCurrency(row.total)}</span>
+                    </div>
+                </div>
+            `).join('');
         }
 
         function updateCashflow(expenses) {
@@ -274,7 +342,7 @@
         function updateLegend(categoryData) {
             const legendContainer = document.getElementById('customLegend');
             legendContainer.innerHTML = '';
-            const monthExpenses = getMonthExpenses(allExpenses);
+            const monthExpenses = getMonthExpenses(allExpenses).filter(passesCardFilter);
             const currentMonthCategories = [...new Set(monthExpenses
                 .filter(exp => exp.amount < 0)
                 .map(exp => exp.category))];
@@ -337,9 +405,11 @@
                 if (!configResponse.ok) throw new Error('Failed to fetch configuration');
                 const config = await configResponse.json();
                 const categorySelect = document.getElementById('category');
-                categorySelect.innerHTML = config.categories.map(cat => 
+                categorySelect.innerHTML = config.categories.map(cat =>
                     `<option value="${cat}">${cat}</option>`
                 ).join('');
+                loadedCards = Array.isArray(config.cards) ? config.cards : [];
+                populateCardControls();
                 currentCurrency = config.currency;
                 startDate = config.startDate;
                 
@@ -463,6 +533,11 @@
             updateChartAndLegend();
         });
 
+        document.getElementById('cardFilter').addEventListener('change', (e) => {
+            currentCardFilter = e.target.value;
+            updateChartAndLegend();
+        });
+
         document.getElementById('toggleExpenseFormBtn').addEventListener('click', function() {
             const formContainer = document.getElementById('addExpenseContainer');
             const isHidden = formContainer.style.display === 'none' || formContainer.style.display === '';
@@ -486,6 +561,7 @@
             const formData = {
                 name: document.getElementById('name').value,
                 category: document.getElementById('category').value,
+                card: document.getElementById('card').value,
                 amount: amount,
                 date: getISODateWithLocalTime(document.getElementById('date').value),
                 tags: Array.from(selectedTags)

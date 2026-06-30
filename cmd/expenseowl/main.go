@@ -62,6 +62,8 @@ func runServer(port int) {
 	http.HandleFunc("/config", handler.GetConfig)
 	http.HandleFunc("/categories", handler.GetCategories)
 	http.HandleFunc("/categories/edit", handler.UpdateCategories)
+	http.HandleFunc("/cards", handler.GetCards)
+	http.HandleFunc("/cards/edit", handler.UpdateCards)
 	http.HandleFunc("/currency", handler.GetCurrency)
 	http.HandleFunc("/currency/edit", handler.UpdateCurrency)
 	http.HandleFunc("/startdate", handler.GetStartDate)
