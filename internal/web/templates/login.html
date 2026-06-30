@@ -5,67 +5,257 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ExpenseOwl</title>
     <link rel="icon" href="/favicon.ico">
-    <link rel="stylesheet" href="/style.css">
-    <script>
-        (function () {
-            try {
-                var t = localStorage.getItem('theme');
-                if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
-                else if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
-            } catch (e) {}
-        })();
-    </script>
+    <meta name="theme-color" content="#070d18">
     <style>
-        .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1rem; }
-        .login-card {
-            width: 100%; max-width: 360px; background: var(--card-bg, #11243f);
-            border: 1px solid var(--border-color, #1d3a5f); border-radius: 16px; padding: 2rem;
-            box-shadow: 0 10px 30px rgba(0,0,0,.25);
+        :root {
+            --bg: #070d18;
+            --teal: #2dd4bf;
+            --teal-deep: #14b8a6;
+            --purple: #8b5cf6;
+            --amber: #f5b14c;
+            --ink: #eef3f9;
+            --muted: #95a8bf;
+            --field: rgba(10, 18, 33, 0.6);
+            --line: rgba(148, 168, 196, 0.18);
+            --error: #fca5a5;
+            --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+            --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         }
-        .login-card h1 { text-align: center; margin: 0 0 .25rem; font-size: 1.4rem; }
-        .login-card p.sub { text-align: center; margin: 0 0 1.5rem; opacity: .7; font-size: .9rem; }
-        .login-card label { display: block; font-size: .85rem; margin: .75rem 0 .25rem; opacity: .85; }
-        .login-card input {
-            width: 100%; box-sizing: border-box; padding: .6rem .75rem; border-radius: 8px;
-            border: 1px solid var(--border-color, #1d3a5f); background: var(--input-bg, #0b1b30);
-            color: inherit; font-size: 1rem;
+
+        * { box-sizing: border-box; }
+
+        html, body { height: 100%; }
+
+        body {
+            margin: 0;
+            font-family: var(--sans);
+            color: var(--ink);
+            background: var(--bg);
+            min-height: 100svh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.25rem;
+            overflow: hidden;
+            position: relative;
         }
-        .login-card button {
-            width: 100%; margin-top: 1.25rem; padding: .7rem; border: none; border-radius: 8px;
-            background: var(--accent, #2dd4bf); color: #04201c; font-weight: 600; font-size: 1rem; cursor: pointer;
+
+        /* --- atmosphere: drifting aurora blobs --- */
+        .aurora {
+            position: fixed;
+            inset: -25%;
+            z-index: 0;
+            filter: blur(70px);
+            pointer-events: none;
         }
-        .login-card button:disabled { opacity: .6; cursor: not-allowed; }
-        .login-msg { margin-top: 1rem; text-align: center; font-size: .9rem; min-height: 1.2em; }
-        .login-msg.error { color: #f87171; }
-        .login-logo { display: block; margin: 0 auto 1rem; width: 64px; height: 64px; }
+        .aurora span {
+            position: absolute;
+            display: block;
+            border-radius: 50%;
+            opacity: 0.55;
+            mix-blend-mode: screen;
+            animation: drift 22s ease-in-out infinite alternate;
+        }
+        .aurora .b1 { width: 46vmax; height: 46vmax; top: -8%; left: -6%; background: radial-gradient(circle at 30% 30%, var(--teal), transparent 60%); }
+        .aurora .b2 { width: 42vmax; height: 42vmax; bottom: -12%; right: -6%; background: radial-gradient(circle at 60% 60%, var(--purple), transparent 62%); animation-delay: -7s; opacity: 0.5; }
+        .aurora .b3 { width: 30vmax; height: 30vmax; top: 38%; left: 42%; background: radial-gradient(circle at 50% 50%, var(--amber), transparent 64%); animation-delay: -13s; opacity: 0.22; }
+
+        @keyframes drift {
+            0%   { transform: translate3d(0,0,0) scale(1); }
+            50%  { transform: translate3d(4%, -5%, 0) scale(1.12); }
+            100% { transform: translate3d(-5%, 4%, 0) scale(0.96); }
+        }
+
+        /* --- grain texture overlay --- */
+        body::after {
+            content: "";
+            position: fixed;
+            inset: 0;
+            z-index: 1;
+            pointer-events: none;
+            opacity: 0.05;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+        }
+
+        /* --- card --- */
+        .card {
+            position: relative;
+            z-index: 2;
+            width: 100%;
+            max-width: 408px;
+            padding: 2.5rem 2.25rem 2.25rem;
+            border-radius: 22px;
+            background: linear-gradient(165deg, rgba(20,32,53,0.82), rgba(9,16,30,0.86));
+            -webkit-backdrop-filter: blur(18px) saturate(140%);
+            backdrop-filter: blur(18px) saturate(140%);
+            border: 1px solid var(--line);
+            box-shadow: 0 30px 80px -30px rgba(0,0,0,0.8), inset 0 1px 0 rgba(255,255,255,0.05);
+        }
+        /* gradient hairline accent on top edge */
+        .card::before {
+            content: "";
+            position: absolute;
+            inset: 0 0 auto 0;
+            height: 1px;
+            border-radius: 22px 22px 0 0;
+            background: linear-gradient(90deg, transparent, var(--teal), var(--purple), transparent);
+            opacity: 0.7;
+        }
+
+        .brand { text-align: center; margin-bottom: 1.75rem; }
+        .logo-ring {
+            width: 88px; height: 88px;
+            margin: 0 auto 0.9rem;
+            display: grid; place-items: center;
+            border-radius: 50%;
+            background: radial-gradient(circle at 50% 40%, rgba(45,212,191,0.22), rgba(139,92,246,0.12) 60%, transparent 72%);
+            box-shadow: 0 0 0 1px rgba(45,212,191,0.25), 0 12px 40px -12px rgba(45,212,191,0.5);
+        }
+        .logo-ring img { width: 62px; height: 62px; display: block; }
+        .wordmark {
+            font-family: var(--serif);
+            font-size: 1.42rem;
+            font-weight: 600;
+            letter-spacing: 0.2px;
+            margin: 0;
+        }
+        .wordmark em { font-style: italic; color: var(--teal); }
+        .tagline {
+            margin: 0.5rem 0 0;
+            font-size: 0.82rem;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        form { margin-top: 0.5rem; }
+        .field { position: relative; margin-top: 1.15rem; }
+        .field label {
+            display: block;
+            font-size: 0.74rem;
+            font-weight: 600;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--teal);
+            margin-bottom: 0.45rem;
+            opacity: 0.92;
+        }
+        .field input {
+            width: 100%;
+            padding: 0.85rem 0.95rem;
+            font-size: 16px; /* avoids iOS zoom */
+            font-family: var(--sans);
+            color: var(--ink);
+            background: var(--field);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            outline: none;
+            transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+        }
+        .field input::placeholder { color: rgba(149,168,191,0.5); }
+        .field input:focus {
+            border-color: var(--teal);
+            background: rgba(45,212,191,0.06);
+            box-shadow: 0 0 0 4px rgba(45,212,191,0.14);
+        }
+
+        button#submit-btn {
+            width: 100%;
+            margin-top: 1.6rem;
+            padding: 0.9rem 1rem;
+            font-size: 1rem;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            color: #04231f;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+            background: linear-gradient(120deg, var(--teal), var(--teal-deep) 55%, #0ea5a0);
+            box-shadow: 0 14px 30px -12px rgba(45,212,191,0.6);
+            transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+        }
+        button#submit-btn:hover { transform: translateY(-2px); box-shadow: 0 18px 38px -12px rgba(45,212,191,0.75); filter: brightness(1.04); }
+        button#submit-btn:active { transform: translateY(0); }
+        button#submit-btn:disabled { opacity: 0.6; cursor: progress; transform: none; }
+        /* sheen sweep on hover */
+        button#submit-btn::after {
+            content: "";
+            position: absolute; top: 0; left: -120%;
+            width: 60%; height: 100%;
+            background: linear-gradient(100deg, transparent, rgba(255,255,255,0.35), transparent);
+            transform: skewX(-18deg);
+            transition: left 0.55s ease;
+        }
+        button#submit-btn:hover::after { left: 140%; }
+
+        .msg { margin-top: 1rem; min-height: 1.25em; text-align: center; font-size: 0.9rem; color: var(--muted); }
+        .msg.error { color: var(--error); }
+
+        .footnote {
+            margin-top: 1.6rem;
+            text-align: center;
+            font-size: 0.74rem;
+            letter-spacing: 0.04em;
+            color: rgba(149,168,191,0.55);
+        }
+
+        /* --- staggered entrance --- */
+        .reveal { opacity: 0; transform: translateY(14px); animation: rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+        .d1 { animation-delay: 0.05s; }
+        .d2 { animation-delay: 0.14s; }
+        .d3 { animation-delay: 0.22s; }
+        .d4 { animation-delay: 0.30s; }
+        .d5 { animation-delay: 0.38s; }
+        .d6 { animation-delay: 0.46s; }
+        @keyframes rise { to { opacity: 1; transform: translateY(0); } }
+
+        @media (prefers-reduced-motion: reduce) {
+            .aurora span, button#submit-btn::after { animation: none; transition: none; }
+            .reveal { opacity: 1; transform: none; animation: none; }
+        }
     </style>
 </head>
 <body>
-    <div class="login-wrap">
-        <div class="login-card">
-            <img src="/pwa/icon-192.png" alt="ExpenseOwl" class="login-logo">
-            <h1 id="title">Iniciar sesión</h1>
-            <p class="sub" id="subtitle">Ingresá a tu cuenta</p>
-            <form id="login-form" autocomplete="on">
-                <label for="username">Usuario</label>
-                <input type="text" id="username" name="username" autocomplete="username" required minlength="3">
-                <label for="password">Contraseña</label>
-                <input type="password" id="password" name="password" autocomplete="current-password" required minlength="8">
-                <button type="submit" id="submit-btn">Entrar</button>
-            </form>
-            <div class="login-msg" id="msg"></div>
-        </div>
+    <div class="aurora" aria-hidden="true">
+        <span class="b1"></span><span class="b2"></span><span class="b3"></span>
     </div>
+
+    <main class="card">
+        <div class="brand">
+            <div class="logo-ring reveal d1"><img src="/pwa/icon-192.png" alt="ExpenseOwl"></div>
+            <h1 class="wordmark reveal d2">Expense<em>Owl</em></h1>
+            <p class="tagline reveal d2" id="title">Iniciar sesión</p>
+        </div>
+
+        <form id="login-form" autocomplete="on">
+            <div class="field reveal d3">
+                <label for="username">Usuario</label>
+                <input type="text" id="username" name="username" autocomplete="username" placeholder="tu usuario" required minlength="3" autofocus>
+            </div>
+            <div class="field reveal d4">
+                <label for="password">Contraseña</label>
+                <input type="password" id="password" name="password" autocomplete="current-password" placeholder="••••••••" required minlength="8">
+            </div>
+            <button type="submit" id="submit-btn" class="reveal d5">Entrar</button>
+        </form>
+
+        <div class="msg reveal d5" id="msg" role="status" aria-live="polite"></div>
+        <p class="footnote reveal d6" id="subtitle">Tus gastos, en privado.</p>
+    </main>
+
     <script>
         let needsSetup = false;
-        const title = document.getElementById('title');
-        const subtitle = document.getElementById('subtitle');
+        const titleEl = document.getElementById('title');     // the small uppercase tagline = login/setup mode
+        const subtitleEl = document.getElementById('subtitle');
         const btn = document.getElementById('submit-btn');
         const msg = document.getElementById('msg');
         const pwd = document.getElementById('password');
+        const userInput = document.getElementById('username');
 
         async function init() {
-            // already logged in? go home.
+            // already authenticated? go home.
             try {
                 const me = await fetch('/auth/me');
                 if (me.ok) { window.location.href = '/'; return; }
@@ -75,20 +265,23 @@
                 needsSetup = !!s.needsSetup;
             } catch (e) {}
             if (needsSetup) {
-                title.textContent = 'Crear administrador';
-                subtitle.textContent = 'Primera vez: creá la cuenta de administrador';
+                titleEl.textContent = 'Crear administrador';
+                subtitleEl.textContent = 'Primera vez: creá la cuenta de administrador.';
                 btn.textContent = 'Crear cuenta';
                 pwd.setAttribute('autocomplete', 'new-password');
             }
+            userInput.focus();
         }
 
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             msg.textContent = '';
-            msg.className = 'login-msg';
+            msg.className = 'msg reveal d5';
+            const original = btn.textContent;
             btn.disabled = true;
+            btn.textContent = needsSetup ? 'Creando…' : 'Entrando…';
             const body = JSON.stringify({
-                username: document.getElementById('username').value.trim(),
+                username: userInput.value.trim(),
                 password: pwd.value,
             });
             const url = needsSetup ? '/auth/setup' : '/auth/login';
@@ -96,13 +289,14 @@
                 const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
                 if (res.ok) { window.location.href = '/'; return; }
                 const data = await res.json().catch(() => ({}));
-                msg.textContent = data.error || 'Error';
-                msg.className = 'login-msg error';
+                msg.textContent = data.error || 'No se pudo iniciar sesión';
+                msg.className = 'msg error reveal d5';
             } catch (err) {
                 msg.textContent = 'Error de red';
-                msg.className = 'login-msg error';
+                msg.className = 'msg error reveal d5';
             } finally {
                 btn.disabled = false;
+                btn.textContent = original;
             }
         });
 
