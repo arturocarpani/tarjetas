@@ -120,6 +120,7 @@ type Expense struct {
 	Amount      float64   `json:"amount"`
 	Currency    string    `json:"currency"`
 	Date        time.Time `json:"date"`
+	ReceiptPath string    `json:"receiptPath"` // filename of the receipt image kept as backup (empty if none)
 }
 
 func (c *Config) SetBaseConfig() {

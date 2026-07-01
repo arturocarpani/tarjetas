@@ -24,6 +24,13 @@ type Handler struct {
 	telegram      *telegram.Client
 	extractor     *ai.Extractor
 	webhookSecret string
+	tgPending     *tgPendingStore
+	receiptsDir   string // where receipt images are stored (empty = feature off)
+}
+
+// SetReceiptsDir enables receipt-image storage in the given directory.
+func (h *Handler) SetReceiptsDir(dir string) {
+	h.receiptsDir = dir
 }
 
 // NewHandler creates a new API handler
@@ -319,7 +326,8 @@ func (h *Handler) EditExpense(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, ErrorResponse{Error: "You can only edit your own expenses"})
 		return
 	}
-	expense.UserID = existing.UserID // preserve ownership
+	expense.UserID = existing.UserID           // preserve ownership
+	expense.ReceiptPath = existing.ReceiptPath // preserve the receipt backup (edit form doesn't send it)
 	if err := h.storage.UpdateExpense(id, expense); err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to edit expense"})
 		log.Printf("API ERROR: Failed to edit expense: %v\n", err)

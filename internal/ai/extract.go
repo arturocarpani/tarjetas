@@ -99,7 +99,10 @@ func (e *Extractor) Extract(ctx context.Context, text string, image []byte, medi
 		sb.WriteString("No cards are configured; always use an empty string for card.\n")
 	}
 	sb.WriteString("Map the expense to the closest allowed category. Amount is a positive number. ")
-	sb.WriteString("If no date is stated, use an empty string. Reply only via the tool call.")
+	sb.WriteString("For the date: if the receipt or message states a date (look for labels like 'FECHA', 'DATE', or a printed date), ")
+	sb.WriteString("return it as YYYY-MM-DD; only if there is truly no date anywhere, use an empty string. ")
+	sb.WriteString("For the name: if the user wrote a concept/description, prefer it; otherwise use the merchant name. ")
+	sb.WriteString("Reply only via the tool call.")
 	system := sb.String()
 
 	blocks := []anthropic.ContentBlockParamUnion{}

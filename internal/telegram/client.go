@@ -38,8 +38,16 @@ func (c *Client) apiURL(method string) string {
 
 // Update is a single incoming update delivered to the webhook.
 type Update struct {
-	UpdateID int      `json:"update_id"`
-	Message  *Message `json:"message"`
+	UpdateID      int            `json:"update_id"`
+	Message       *Message       `json:"message"`
+	CallbackQuery *CallbackQuery `json:"callback_query"`
+}
+
+// CallbackQuery is delivered when a user taps an inline-keyboard button.
+type CallbackQuery struct {
+	ID      string   `json:"id"`
+	Data    string   `json:"data"`
+	Message *Message `json:"message"` // the message the keyboard is attached to
 }
 
 // Message is a chat message; it may carry text and/or photo sizes.
@@ -111,6 +119,58 @@ func (c *Client) SendMessage(chatID int64, text string) error {
 	return c.do("sendMessage", map[string]any{
 		"chat_id": chatID,
 		"text":    text,
+	}, nil)
+}
+
+// InlineKeyboardButton is one tappable button; CallbackData is echoed back in a
+// CallbackQuery when tapped (max 64 bytes).
+type InlineKeyboardButton struct {
+	Text         string `json:"text"`
+	CallbackData string `json:"callback_data"`
+}
+
+// InlineKeyboardMarkup is a grid of inline buttons attached to a message.
+type InlineKeyboardMarkup struct {
+	InlineKeyboard [][]InlineKeyboardButton `json:"inline_keyboard"`
+}
+
+// SendMessageWithKeyboard sends a message with an inline keyboard and returns
+// the sent message's ID so it can be edited later.
+func (c *Client) SendMessageWithKeyboard(chatID int64, text string, markup InlineKeyboardMarkup) (int, error) {
+	var result struct {
+		MessageID int `json:"message_id"`
+	}
+	err := c.do("sendMessage", map[string]any{
+		"chat_id":      chatID,
+		"text":         text,
+		"reply_markup": markup,
+	}, &result)
+	return result.MessageID, err
+}
+
+// EditMessageText replaces the text and keyboard of an existing message.
+func (c *Client) EditMessageText(chatID int64, messageID int, text string, markup InlineKeyboardMarkup) error {
+	return c.do("editMessageText", map[string]any{
+		"chat_id":      chatID,
+		"message_id":   messageID,
+		"text":         text,
+		"reply_markup": markup,
+	}, nil)
+}
+
+// EditMessagePlain replaces the text of a message and removes its keyboard.
+func (c *Client) EditMessagePlain(chatID int64, messageID int, text string) error {
+	return c.do("editMessageText", map[string]any{
+		"chat_id":    chatID,
+		"message_id": messageID,
+		"text":       text,
+	}, nil)
+}
+
+// AnswerCallbackQuery acknowledges a button tap (dismisses the client spinner).
+func (c *Client) AnswerCallbackQuery(callbackID string) error {
+	return c.do("answerCallbackQuery", map[string]any{
+		"callback_query_id": callbackID,
 	}, nil)
 }
 

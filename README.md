@@ -194,8 +194,11 @@ Sessions are kept in memory (cookie-based), so a restart requires logging in aga
 
 ExpenseOwl can run an optional Telegram bot that reads an expense from a text message
 **or a photo of a receipt** and loads it for the right user. It uses Claude (Opus 4.8,
-with vision for photos) to extract the name, amount, category, card, date, and tags, then
-saves the expense through the same path as the web UI.
+with vision for photos) to extract the name, amount, category, card, date, and tags. The
+bot then shows an **interactive confirmation** with inline buttons — pick the card and
+category, edit the concept or date, and confirm — before saving through the same path as
+the web UI. When you send a photo, the **receipt image is kept as backup** and is viewable
+from the table view (a receipt icon on each expense that has one; owner or admin only).
 
 The bot is enabled only when `TELEGRAM_BOT_TOKEN`, `ANTHROPIC_API_KEY`, **and**
 `TELEGRAM_WEBHOOK_SECRET` are all set; otherwise the app logs `Telegram bot disabled` and

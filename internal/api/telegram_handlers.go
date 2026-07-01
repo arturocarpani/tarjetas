@@ -6,12 +6,41 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/tanq16/expenseowl/internal/ai"
 	"github.com/tanq16/expenseowl/internal/storage"
 	"github.com/tanq16/expenseowl/internal/telegram"
 )
+
+// pendingExpense is an extracted-but-not-yet-saved expense awaiting the user's
+// confirmation/edits via the inline keyboard.
+type pendingExpense struct {
+	exp        storage.Expense
+	userID     string
+	cards      []string
+	categories []string
+	currency   string
+	image      []byte // receipt image bytes, kept until the user confirms
+	mediaType  string
+	awaiting   string // "" | "concept" | "date": what free-text reply we expect next
+	messageID  int    // the bot message that carries the keyboard, so we can edit it
+}
+
+// tgPendingStore keeps one in-flight confirmation per chat. In-memory (lost on
+// restart, which only drops half-finished confirmations — acceptable).
+type tgPendingStore struct {
+	mu sync.Mutex
+	m  map[int64]*pendingExpense
+}
+
+func newTGPendingStore() *tgPendingStore {
+	return &tgPendingStore{m: map[int64]*pendingExpense{}}
+}
 
 // EnableTelegram wires the Telegram bot into the handler. Kept separate from
 // NewHandler so the existing constructor signature (and its tests) stay intact.
@@ -19,6 +48,7 @@ func (h *Handler) EnableTelegram(client *telegram.Client, extractor *ai.Extracto
 	h.telegram = client
 	h.extractor = extractor
 	h.webhookSecret = webhookSecret
+	h.tgPending = newTGPendingStore()
 }
 
 // TelegramEnabled reports whether the bot is configured.
@@ -56,6 +86,10 @@ func (h *Handler) TelegramWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) processUpdate(update telegram.Update) {
+	if update.CallbackQuery != nil {
+		h.handleCallback(update.CallbackQuery)
+		return
+	}
 	msg := update.Message
 	if msg == nil {
 		return
@@ -72,9 +106,19 @@ func (h *Handler) processUpdate(update telegram.Update) {
 	if text == "" {
 		text = msg.Caption
 	}
+	fileID := msg.LargestPhotoID()
+
+	// If we're waiting for a free-text edit (concept/date) and this is a plain
+	// text message, treat it as the edit value rather than a new expense.
+	if fileID == "" && strings.TrimSpace(text) != "" {
+		if handled := h.applyTextEdit(chatID, text); handled {
+			return
+		}
+	}
+
 	var image []byte
 	var mediaType string
-	if fileID := msg.LargestPhotoID(); fileID != "" {
+	if fileID != "" {
 		path, err := h.telegram.GetFile(fileID)
 		if err != nil {
 			log.Printf("TELEGRAM ERROR: getFile: %v\n", err)
@@ -88,7 +132,7 @@ func (h *Handler) processUpdate(update telegram.Update) {
 			return
 		}
 	}
-	if text == "" && image == nil {
+	if strings.TrimSpace(text) == "" && image == nil {
 		h.reply(chatID, "Mandame el gasto como texto o una foto del ticket.")
 		return
 	}
@@ -110,19 +154,249 @@ func (h *Handler) processUpdate(update telegram.Update) {
 		h.reply(chatID, "No pude interpretar el gasto. Probá ser más específico (nombre, monto, categoría).")
 		return
 	}
-
 	expense.UserID = user.ID
 	expense.Currency = currency
-	if err := expense.Validate(); err != nil {
-		h.reply(chatID, fmt.Sprintf("El gasto no es válido: %s", err.Error()))
+
+	p := &pendingExpense{
+		exp:        expense,
+		userID:     user.ID,
+		cards:      cards,
+		categories: categories,
+		currency:   currency,
+		image:      image,
+		mediaType:  mediaType,
+	}
+	msgID, err := h.telegram.SendMessageWithKeyboard(chatID, summaryText(p), mainKeyboard())
+	if err != nil {
+		log.Printf("TELEGRAM ERROR: send keyboard: %v\n", err)
 		return
 	}
-	if err := h.storage.AddExpense(expense); err != nil {
+	p.messageID = msgID
+	h.tgPending.mu.Lock()
+	h.tgPending.m[chatID] = p
+	h.tgPending.mu.Unlock()
+}
+
+// applyTextEdit consumes a free-text reply when a pending expense is awaiting a
+// concept or date edit. Returns true if it handled the message.
+func (h *Handler) applyTextEdit(chatID int64, text string) bool {
+	h.tgPending.mu.Lock()
+	p := h.tgPending.m[chatID]
+	if p == nil || p.awaiting == "" {
+		h.tgPending.mu.Unlock()
+		return false
+	}
+	var errMsg string
+	switch p.awaiting {
+	case "concept":
+		name := storage.SanitizeString(text)
+		if name == "" {
+			errMsg = "El concepto no puede quedar vacío. Mandame un texto."
+		} else {
+			p.exp.Name = name
+			p.awaiting = ""
+		}
+	case "date":
+		parsed, ok := parseISODate(text)
+		if !ok {
+			errMsg = "Fecha inválida. Usá el formato AAAA-MM-DD (ej. 2026-06-30)."
+		} else {
+			p.exp.Date = parsed
+			p.awaiting = ""
+		}
+	}
+	summary := summaryText(p)
+	msgID := p.messageID
+	h.tgPending.mu.Unlock()
+
+	if errMsg != "" {
+		h.reply(chatID, errMsg)
+		return true
+	}
+	if err := h.telegram.EditMessageText(chatID, msgID, summary, mainKeyboard()); err != nil {
+		log.Printf("TELEGRAM ERROR: edit after text: %v\n", err)
+	}
+	return true
+}
+
+func (h *Handler) handleCallback(cq *telegram.CallbackQuery) {
+	defer func() {
+		if err := h.telegram.AnswerCallbackQuery(cq.ID); err != nil {
+			log.Printf("TELEGRAM ERROR: answerCallback: %v\n", err)
+		}
+	}()
+	if cq.Message == nil {
+		return
+	}
+	chatID := cq.Message.Chat.ID
+
+	h.tgPending.mu.Lock()
+	p := h.tgPending.m[chatID]
+	if p == nil {
+		h.tgPending.mu.Unlock()
+		h.reply(chatID, "Esta confirmación expiró. Mandá el gasto de nuevo.")
+		return
+	}
+
+	data := cq.Data
+	var (
+		toSave     *pendingExpense
+		editText   string
+		editMarkup telegram.InlineKeyboardMarkup
+		doEdit     bool
+		askPrompt  string
+		cancelText string
+	)
+
+	switch {
+	case data == "save":
+		toSave = p
+		delete(h.tgPending.m, chatID)
+	case data == "cancel":
+		delete(h.tgPending.m, chatID)
+		cancelText = "❌ Cancelado. No se guardó nada."
+	case data == "menu:main":
+		editText, editMarkup, doEdit = summaryText(p), mainKeyboard(), true
+	case data == "menu:card":
+		editText, editMarkup, doEdit = cardMenuText(p), cardKeyboard(p.cards), true
+	case data == "menu:cat":
+		editText, editMarkup, doEdit = summaryText(p), catKeyboard(p.categories), true
+	case data == "pick:card:none":
+		p.exp.Card = ""
+		editText, editMarkup, doEdit = summaryText(p), mainKeyboard(), true
+	case strings.HasPrefix(data, "pick:card:"):
+		if i, err := strconv.Atoi(strings.TrimPrefix(data, "pick:card:")); err == nil && i >= 0 && i < len(p.cards) {
+			p.exp.Card = p.cards[i]
+		}
+		editText, editMarkup, doEdit = summaryText(p), mainKeyboard(), true
+	case strings.HasPrefix(data, "pick:cat:"):
+		if i, err := strconv.Atoi(strings.TrimPrefix(data, "pick:cat:")); err == nil && i >= 0 && i < len(p.categories) {
+			p.exp.Category = p.categories[i]
+		}
+		editText, editMarkup, doEdit = summaryText(p), mainKeyboard(), true
+	case data == "ask:concept":
+		p.awaiting = "concept"
+		askPrompt = "Mandame el concepto del gasto:"
+	case data == "ask:date":
+		p.awaiting = "date"
+		askPrompt = "Mandame la fecha en formato AAAA-MM-DD (ej. 2026-06-30):"
+	}
+	msgID := p.messageID
+	h.tgPending.mu.Unlock()
+
+	switch {
+	case toSave != nil:
+		h.saveConfirmed(chatID, msgID, toSave)
+	case cancelText != "":
+		if err := h.telegram.EditMessagePlain(chatID, msgID, cancelText); err != nil {
+			log.Printf("TELEGRAM ERROR: edit cancel: %v\n", err)
+		}
+	case askPrompt != "":
+		h.reply(chatID, askPrompt)
+	case doEdit:
+		if err := h.telegram.EditMessageText(chatID, msgID, editText, editMarkup); err != nil {
+			log.Printf("TELEGRAM ERROR: edit menu: %v\n", err)
+		}
+	}
+}
+
+func (h *Handler) saveConfirmed(chatID int64, msgID int, p *pendingExpense) {
+	p.exp.UserID = p.userID
+	p.exp.Currency = p.currency
+	if err := p.exp.Validate(); err != nil {
+		h.telegram.EditMessagePlain(chatID, msgID, fmt.Sprintf("El gasto no es válido: %s", err.Error()))
+		return
+	}
+	// Persist the receipt image (if any) as backup, naming it after the expense
+	// ID we assign here so AddExpense keeps it.
+	if len(p.image) > 0 && h.receiptsDir != "" {
+		if p.exp.ID == "" {
+			p.exp.ID = uuid.New().String()
+		}
+		if name, err := h.saveReceipt(p.exp.ID, p.image, p.mediaType); err != nil {
+			log.Printf("TELEGRAM ERROR: save receipt: %v\n", err)
+		} else {
+			p.exp.ReceiptPath = name
+		}
+	}
+	if err := h.storage.AddExpense(p.exp); err != nil {
 		log.Printf("TELEGRAM ERROR: save: %v\n", err)
-		h.reply(chatID, "No pude guardar el gasto. Probá de nuevo.")
+		h.telegram.EditMessagePlain(chatID, msgID, "No pude guardar el gasto. Probá de nuevo.")
 		return
 	}
-	h.reply(chatID, formatConfirmation(expense))
+	if err := h.telegram.EditMessagePlain(chatID, msgID, formatConfirmation(p.exp)); err != nil {
+		log.Printf("TELEGRAM ERROR: edit confirm: %v\n", err)
+	}
+}
+
+// ------------------------------------------------------------
+// Rendering helpers
+// ------------------------------------------------------------
+
+func summaryText(p *pendingExpense) string {
+	card := p.exp.Card
+	if card == "" {
+		card = "(sin asignar)"
+	}
+	return fmt.Sprintf(
+		"Revisá el gasto y confirmá:\n• Concepto: %s\n• Monto: %.2f\n• Categoría: %s\n• Fecha: %s\n• Tarjeta: %s",
+		p.exp.Name, p.exp.Amount, p.exp.Category, p.exp.Date.Format("2006-01-02"), card,
+	)
+}
+
+func cardMenuText(p *pendingExpense) string {
+	if len(p.cards) == 0 {
+		return summaryText(p) + "\n\n(No hay tarjetas cargadas. Agregalas en Settings → Tarjetas.)"
+	}
+	return summaryText(p) + "\n\nElegí la tarjeta:"
+}
+
+func mainKeyboard() telegram.InlineKeyboardMarkup {
+	return telegram.InlineKeyboardMarkup{InlineKeyboard: [][]telegram.InlineKeyboardButton{
+		{{Text: "✅ Guardar", CallbackData: "save"}, {Text: "❌ Cancelar", CallbackData: "cancel"}},
+		{{Text: "💳 Tarjeta", CallbackData: "menu:card"}, {Text: "🏷️ Categoría", CallbackData: "menu:cat"}},
+		{{Text: "✏️ Concepto", CallbackData: "ask:concept"}, {Text: "📅 Fecha", CallbackData: "ask:date"}},
+	}}
+}
+
+func cardKeyboard(cards []string) telegram.InlineKeyboardMarkup {
+	rows := buttonGrid("pick:card:", cards)
+	rows = append(rows, []telegram.InlineKeyboardButton{{Text: "Sin tarjeta", CallbackData: "pick:card:none"}})
+	rows = append(rows, []telegram.InlineKeyboardButton{{Text: "⬅️ Volver", CallbackData: "menu:main"}})
+	return telegram.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func catKeyboard(categories []string) telegram.InlineKeyboardMarkup {
+	rows := buttonGrid("pick:cat:", categories)
+	rows = append(rows, []telegram.InlineKeyboardButton{{Text: "⬅️ Volver", CallbackData: "menu:main"}})
+	return telegram.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+// buttonGrid lays out one button per item (2 per row) with callback data
+// "<prefix><index>".
+func buttonGrid(prefix string, items []string) [][]telegram.InlineKeyboardButton {
+	var rows [][]telegram.InlineKeyboardButton
+	var row []telegram.InlineKeyboardButton
+	for i, item := range items {
+		row = append(row, telegram.InlineKeyboardButton{Text: item, CallbackData: prefix + strconv.Itoa(i)})
+		if len(row) == 2 {
+			rows = append(rows, row)
+			row = nil
+		}
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func parseISODate(s string) (time.Time, bool) {
+	parsed, err := time.Parse("2006-01-02", strings.TrimSpace(s))
+	if err != nil {
+		return time.Time{}, false
+	}
+	now := time.Now()
+	return time.Date(parsed.Year(), parsed.Month(), parsed.Day(), now.Hour(), now.Minute(), now.Second(), 0, now.Location()), true
 }
 
 func formatConfirmation(e storage.Expense) string {
@@ -130,6 +404,7 @@ func formatConfirmation(e storage.Expense) string {
 	if e.Card != "" {
 		line += " (" + e.Card + ")"
 	}
+	line += "\n" + e.Date.Format("2006-01-02")
 	return line
 }
 
