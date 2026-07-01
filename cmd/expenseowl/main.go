@@ -108,6 +108,7 @@ func runServer(port int) {
 	handler := api.NewHandler(store, sessions)
 	handler.SetReceiptsDir(receiptsDir())
 	setupTelegram(handler)
+	handler.StartMonthlyReporter() // no-op unless the Telegram bot is enabled
 
 	// Version Handler (public)
 	http.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {

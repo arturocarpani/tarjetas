@@ -203,6 +203,10 @@ After saving, the confirmation message keeps **🗑️ Delete** and **✏️ Edi
 user can remove or re-edit that expense straight from Telegram. Bot commands: `/resumen`
 (total this month), `/ultimos` (recent expenses), `/cancelar`, `/ayuda`.
 
+On the configured start-of-period day, the bot automatically sends each linked user their
+total for the period that just ended (admins get a per-user consolidated breakdown). The
+last reported period is persisted on the data volume so a redeploy doesn't re-send.
+
 CSV export accepts optional filters via query params — `from`/`to` (YYYY-MM-DD), `card`,
 and `userID` (admin only) — and the settings page exposes a date range. Non-admins always
 export only their own expenses.
