@@ -27,38 +27,69 @@ func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, _ := currentUser(r)
-	if !user.IsAdmin {
-		filtered := make([]storage.Expense, 0, len(expenses))
-		for _, e := range expenses {
-			if e.UserID == user.ID {
-				filtered = append(filtered, e)
-			}
-		}
-		expenses = filtered
+
+	// Optional filters (query params): from/to (YYYY-MM-DD, inclusive), card,
+	// and userID (admin only). Non-admins are always scoped to their own data.
+	q := r.URL.Query()
+	from, hasFrom := parseDateOnly(q.Get("from"))
+	to, hasTo := parseDateOnly(q.Get("to"))
+	if hasTo {
+		to = to.Add(24*time.Hour - time.Nanosecond) // include the whole "to" day
 	}
+	cardFilter := q.Get("card")
+	userFilter := q.Get("userID")
+
+	filtered := make([]storage.Expense, 0, len(expenses))
+	for _, e := range expenses {
+		if !user.IsAdmin && e.UserID != user.ID {
+			continue
+		}
+		if user.IsAdmin && userFilter != "" && e.UserID != userFilter {
+			continue
+		}
+		if cardFilter != "" && e.Card != cardFilter {
+			continue
+		}
+		if hasFrom && e.Date.Before(from) {
+			continue
+		}
+		if hasTo && e.Date.After(to) {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+	expenses = filtered
+
+	// Map user IDs to usernames for the User column (admin export).
+	names := map[string]string{}
+	if users, err := h.storage.ListUsers(); err == nil {
+		for _, u := range users {
+			names[u.ID] = u.Username
+		}
+	}
+
 	w.Header().Set("Content-Type", "text/csv")
 	w.Header().Set("Content-Disposition", "attachment; filename=expenses.csv")
 	writer := csv.NewWriter(w)
 	defer writer.Flush()
 
-	// Write header
-	headers := []string{"ID", "Name", "Category", "Card", "Amount", "Date", "Tags"}
+	headers := []string{"ID", "Name", "Category", "Card", "Amount", "Currency", "Date", "Tags", "User"}
 	if err := writer.Write(headers); err != nil {
 		log.Printf("API ERROR: Failed to write CSV header: %v\n", err)
 		return
 	}
 
-	// Write records
 	for _, expense := range expenses {
 		record := []string{
 			expense.ID,
 			expense.Name,
 			expense.Category,
 			expense.Card,
-			// expense.Currency,
 			strconv.FormatFloat(expense.Amount, 'f', 2, 64),
+			expense.Currency,
 			expense.Date.Format(time.RFC3339),
 			strings.Join(expense.Tags, ","),
+			names[expense.UserID],
 		}
 		if err := writer.Write(record); err != nil {
 			log.Printf("API ERROR: Failed to write CSV record for expense ID %s: %v\n", expense.ID, err)
@@ -66,6 +97,18 @@ func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	log.Println("HTTP: Exported expenses to CSV")
+}
+
+// parseDateOnly parses a YYYY-MM-DD query param; ok=false if empty/invalid.
+func parseDateOnly(s string) (time.Time, bool) {
+	if s == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 // imports expenses from CSV

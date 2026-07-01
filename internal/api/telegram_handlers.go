@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -387,8 +389,12 @@ Después te muestro lo que entendí y podés:
 Y sobre un gasto ya guardado: 🗑️ Borrar o ✏️ Editar.
 
 Comandos:
+/resumen — total gastado este mes
+/ultimos — tus últimos gastos
 /cancelar — descartar el gasto en curso
 /ayuda — esta ayuda`
+
+var spanishMonths = []string{"enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"}
 
 func (h *Handler) handleCommand(chatID int64, user storage.User, text string) {
 	fields := strings.Fields(text)
@@ -396,6 +402,10 @@ func (h *Handler) handleCommand(chatID int64, user storage.User, text string) {
 	switch cmd {
 	case "/start", "/help", "/ayuda":
 		h.reply(chatID, botHelpText)
+	case "/resumen":
+		h.handleResumen(chatID, user)
+	case "/ultimos", "/últimos":
+		h.handleUltimos(chatID, user)
 	case "/cancelar", "/cancel":
 		h.tgPending.mu.Lock()
 		_, had := h.tgPending.m[chatID]
@@ -409,6 +419,52 @@ func (h *Handler) handleCommand(chatID int64, user storage.User, text string) {
 	default:
 		h.reply(chatID, "Comando no reconocido.\n\n"+botHelpText)
 	}
+}
+
+// userExpenses returns all expenses owned by a user.
+func (h *Handler) userExpenses(userID string) []storage.Expense {
+	all, err := h.storage.GetAllExpenses()
+	if err != nil {
+		return nil
+	}
+	out := make([]storage.Expense, 0, len(all))
+	for _, e := range all {
+		if e.UserID == userID {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func (h *Handler) handleResumen(chatID int64, user storage.User) {
+	now := time.Now()
+	var total float64
+	var count int
+	for _, e := range h.userExpenses(user.ID) {
+		if e.Date.Year() == now.Year() && e.Date.Month() == now.Month() {
+			total += e.Amount
+			count++
+		}
+	}
+	h.reply(chatID, fmt.Sprintf("📊 %s %d\nGastos: %d\nTotal: %.2f", spanishMonths[int(now.Month())-1], now.Year(), count, math.Abs(total)))
+}
+
+func (h *Handler) handleUltimos(chatID int64, user storage.User) {
+	exps := h.userExpenses(user.ID)
+	if len(exps) == 0 {
+		h.reply(chatID, "Todavía no tenés gastos cargados.")
+		return
+	}
+	sort.Slice(exps, func(i, j int) bool { return exps[i].Date.After(exps[j].Date) })
+	if len(exps) > 5 {
+		exps = exps[:5]
+	}
+	var b strings.Builder
+	b.WriteString("🧾 Tus últimos gastos:\n")
+	for _, e := range exps {
+		b.WriteString(fmt.Sprintf("• %s — %s — %.2f — %s\n", e.Date.Format("02/01"), e.Name, math.Abs(e.Amount), e.Category))
+	}
+	h.reply(chatID, strings.TrimRight(b.String(), "\n"))
 }
 
 func (h *Handler) handleDeleteCallback(chatID int64, msgID int, id string) {
