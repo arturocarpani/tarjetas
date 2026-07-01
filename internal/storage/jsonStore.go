@@ -309,7 +309,6 @@ func (s *jsonStore) readExpensesFile(path string) (*expensesFileData, error) {
 	if err := json.Unmarshal(content, &data); err != nil {
 		return nil, err
 	}
-	log.Println("Read expenses file")
 	return &data, nil
 }
 
@@ -318,7 +317,6 @@ func (s *jsonStore) writeExpensesFile(path string, data *expensesFileData) error
 	if err != nil {
 		return err
 	}
-	log.Println("Wrote expenses file")
 	return writeFileAtomic(path, content, 0644)
 }
 
@@ -331,7 +329,6 @@ func (s *jsonStore) readConfigFile(path string) (*Config, error) {
 	if err := json.Unmarshal(content, &data); err != nil {
 		return nil, err
 	}
-	log.Println("Read config file")
 	return &data, nil
 }
 
@@ -340,7 +337,6 @@ func (s *jsonStore) writeConfigFile(path string, data *Config) error {
 	if err != nil {
 		return err
 	}
-	log.Println("Wrote config file")
 	return writeFileAtomic(path, content, 0644)
 }
 

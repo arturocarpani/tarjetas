@@ -38,6 +38,36 @@ func currentUser(r *http.Request) (storage.User, bool) {
 	return user, ok
 }
 
+// ownedExpenses returns the expenses a user may see: all for an admin, otherwise
+// only their own. Centralizing this avoids per-endpoint filter drift (a missed
+// filter would leak other users' data).
+func ownedExpenses(user storage.User, expenses []storage.Expense) []storage.Expense {
+	if user.IsAdmin {
+		return expenses
+	}
+	out := make([]storage.Expense, 0, len(expenses))
+	for _, e := range expenses {
+		if e.UserID == user.ID {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// ownedRecurring is ownedExpenses for recurring expenses.
+func ownedRecurring(user storage.User, recurring []storage.RecurringExpense) []storage.RecurringExpense {
+	if user.IsAdmin {
+		return recurring
+	}
+	out := make([]storage.RecurringExpense, 0, len(recurring))
+	for _, re := range recurring {
+		if re.UserID == user.ID {
+			out = append(out, re)
+		}
+	}
+	return out
+}
+
 // RequirePage wraps a page handler: redirects to /login when unauthenticated.
 func (h *Handler) RequirePage(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
