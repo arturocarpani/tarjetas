@@ -240,8 +240,8 @@ admin's consolidated view work the same as in the web app.
 
 ### Multi-currency
 
-Each expense can have its own currency (chosen in the web add/edit forms; the Telegram bot
-uses the configured default). Totals are **grouped by currency** wherever they're shown
+Each expense can have its own currency (chosen in the web add/edit forms; the Telegram bot's
+confirmation has a 💱 currency button to pick ARS or USD, defaulting to the configured one). Totals are **grouped by currency** wherever they're shown
 (dashboard total, per-card and per-user breakdowns, table total) — e.g. `USD 100 · ARS 50.000`
 — with no conversion, so amounts in different currencies are never summed as if equal.
 
