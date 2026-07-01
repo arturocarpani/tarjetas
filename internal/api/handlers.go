@@ -74,15 +74,8 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	// Config carries everyone's recurring expenses; non-admins must only see
 	// their own (same scoping as GetRecurringExpenses).
-	if user, _ := currentUser(r); !user.IsAdmin {
-		filtered := make([]storage.RecurringExpense, 0, len(config.RecurringExpenses))
-		for _, re := range config.RecurringExpenses {
-			if re.UserID == user.ID {
-				filtered = append(filtered, re)
-			}
-		}
-		config.RecurringExpenses = filtered
-	}
+	user, _ := currentUser(r)
+	config.RecurringExpenses = ownedRecurring(user, config.RecurringExpenses)
 	writeJSON(w, http.StatusOK, config)
 }
 
@@ -287,15 +280,7 @@ func (h *Handler) GetExpenses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, _ := currentUser(r)
-	if !user.IsAdmin {
-		filtered := make([]storage.Expense, 0, len(expenses))
-		for _, e := range expenses {
-			if e.UserID == user.ID {
-				filtered = append(filtered, e)
-			}
-		}
-		expenses = filtered
-	}
+	expenses = ownedExpenses(user, expenses)
 	writeJSON(w, http.StatusOK, expenses)
 }
 
@@ -436,15 +421,7 @@ func (h *Handler) GetRecurringExpenses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, _ := currentUser(r)
-	if !user.IsAdmin {
-		filtered := make([]storage.RecurringExpense, 0, len(res))
-		for _, re := range res {
-			if re.UserID == user.ID {
-				filtered = append(filtered, re)
-			}
-		}
-		res = filtered
-	}
+	res = ownedRecurring(user, res)
 	writeJSON(w, http.StatusOK, res)
 }
 
