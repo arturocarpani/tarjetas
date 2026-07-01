@@ -468,16 +468,8 @@ header {
     justify-content: center;
 }
 
-.cashflow-item.income {
-    background-color: rgba(52, 211, 153, 0.1);
-}
-
 .cashflow-item.expenses {
     background-color: rgba(239, 68, 68, 0.1);
-}
-
-.cashflow-item.balance {
-    background-color: rgba(251, 191, 36, 0.1);
 }
 
 .cashflow-label {
@@ -489,14 +481,6 @@ header {
 .cashflow-value {
     font-size: 1.4rem;
     font-weight: bold;
-}
-
-.cashflow-value.positive {
-    color: #2EAB7D;
-}
-
-.cashflow-value.negative {
-    color: #EF4444;
 }
 
 .import-section {

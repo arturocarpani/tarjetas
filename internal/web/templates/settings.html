@@ -33,6 +33,9 @@
                 <a href="/settings" class="view-button active" data-tooltip="Settings">
                     <i class="fa-solid fa-gear"></i>
                 </a>
+                <a href="/logout" class="view-button" data-tooltip="Logout">
+                    <i class="fa-solid fa-right-from-bracket"></i>
+                </a>
             </div>
         </header>
 
@@ -70,6 +73,32 @@
                 <button id="saveCards" class="nav-button">Save Cards</button>
                 <div id="cardsMessage" class="form-message"></div>
             </div>
+        </div>
+
+        <div class="form-container" id="users-section" style="display: none;">
+            <h2 align="center">Usuarios</h2>
+            <div id="users-list" class="categories-list"></div>
+            <h3 align="center" style="margin-top: 1.5rem;">Nuevo usuario</h3>
+            <form id="addUserForm" class="expense-form">
+                <div class="form-group">
+                    <label for="newUsername">Usuario</label>
+                    <input type="text" id="newUsername" autocomplete="off" required>
+                </div>
+                <div class="form-group">
+                    <label for="newUserPassword">Contraseña</label>
+                    <input type="password" id="newUserPassword" autocomplete="new-password" required>
+                </div>
+                <div class="form-group">
+                    <label for="newUserTelegramID">Telegram ID (opcional)</label>
+                    <input type="text" id="newUserTelegramID" autocomplete="off" placeholder="ej. 123456789">
+                </div>
+                <div class="form-group form-group-checkbox">
+                    <label for="newUserIsAdmin">Admin</label>
+                    <input type="checkbox" id="newUserIsAdmin" class="styled-checkbox">
+                </div>
+                <button type="submit" class="nav-button">Crear usuario</button>
+            </form>
+            <div id="usersMessage" class="form-message"></div>
         </div>
 
         <div class="settings-container">
@@ -183,10 +212,6 @@
                     <label for="recurringOccurrences">Occurrences</label>
                     <input type="number" id="recurringOccurrences" min="2" value="2" required>
                 </div>
-                <div class="form-group form-group-checkbox">
-                    <label for="recurringReportGain">Report Gain</label>
-                    <input type="checkbox" id="recurringReportGain" class="styled-checkbox">
-                </div>
                 <button type="submit" class="nav-button">Add Recurring Transaction</button>
             </form>
             <div id="recurringExpenseMessage" class="form-message"></div>
@@ -252,10 +277,6 @@
                 <div class="form-group">
                     <label for="editRecurringOccurrences">Occurrences (0 for indefinite)</label>
                     <input type="number" id="editRecurringOccurrences" min="0" value="0" required>
-                </div>
-                <div class="form-group form-group-checkbox">
-                    <label for="editRecurringReportGain">Report Gain</label>
-                    <input type="checkbox" id="editRecurringReportGain" class="styled-checkbox">
                 </div>
             </form>
             <div class="modal-buttons">
@@ -717,7 +738,6 @@
             if (!recurringExpenseToEdit) return;
             document.getElementById('editRecurringName').value = recurringExpenseToEdit.name;
             document.getElementById('editRecurringAmount').value = Math.abs(recurringExpenseToEdit.amount);
-            document.getElementById('editRecurringReportGain').checked = recurringExpenseToEdit.amount > 0;
             document.getElementById('editRecurringCategory').value = recurringExpenseToEdit.category;
             document.getElementById('editRecurringCard').value = recurringExpenseToEdit.card || '';
             document.getElementById('editRecurringInterval').value = recurringExpenseToEdit.interval;
@@ -735,10 +755,7 @@
 
         async function confirmRecurringUpdate(updateAll) {
             if (!recurringExpenseToEdit) return;
-            let amount = parseFloat(document.getElementById('editRecurringAmount').value);
-            if (!document.getElementById('editRecurringReportGain').checked) {
-                amount *= -1;
-            }
+            const amount = -Math.abs(parseFloat(document.getElementById('editRecurringAmount').value));
 
             const updatedData = {
                 ...recurringExpenseToEdit,
@@ -901,7 +918,99 @@
                 showMessage('categoriesMessage', 'Failed to load settings', false);
             }
         }
-        
+
+        // --- User Management (admin only) ---
+        async function setupUserManagement() {
+            try {
+                const res = await fetch('/me');
+                if (!res.ok) return;
+                const me = await res.json();
+                if (!me.isAdmin) return;
+                document.getElementById('users-section').style.display = 'block';
+                await loadUsers();
+            } catch (e) {
+                console.error('Failed to set up user management:', e);
+            }
+        }
+
+        async function loadUsers() {
+            const list = document.getElementById('users-list');
+            try {
+                const res = await fetch('/users');
+                if (!res.ok) throw new Error('Failed to fetch users');
+                const users = await res.json();
+                list.innerHTML = (users || []).map(u => `
+                    <div class="category-item">
+                        <span>${escapeHTML(u.username)}${u.isAdmin ? ' <strong>(admin)</strong>' : ''}${u.telegramID ? ` <small>· TG ${escapeHTML(u.telegramID)}</small>` : ''}</span>
+                        <span>
+                            <button class="nav-button" onclick="setUserTelegram('${u.id}', '${escapeHTML(u.username)}', '${escapeHTML(u.telegramID || '')}')">Telegram</button>
+                            <button class="nav-button" onclick="resetUserPassword('${u.id}', '${escapeHTML(u.username)}')">Reset clave</button>
+                            <button class="nav-button" onclick="deleteUser('${u.id}', '${escapeHTML(u.username)}')">Eliminar</button>
+                        </span>
+                    </div>
+                `).join('');
+            } catch (e) {
+                showMessage('usersMessage', 'No se pudieron cargar los usuarios', false);
+            }
+        }
+
+        async function deleteUser(id, username) {
+            if (!confirm(`¿Eliminar al usuario "${username}"? Sus gastos quedarán sin dueño (solo visibles para el admin).`)) return;
+            try {
+                const res = await fetch(`/users/delete?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+                if (res.ok) {
+                    showMessage('usersMessage', 'Usuario eliminado', true);
+                    await loadUsers();
+                } else {
+                    const err = await res.json();
+                    showMessage('usersMessage', err.error || 'No se pudo eliminar', false);
+                }
+            } catch (e) {
+                showMessage('usersMessage', 'Error de red', false);
+            }
+        }
+
+        async function setUserTelegram(id, username, current) {
+            const telegramID = prompt(`Telegram chat ID para "${username}" (vacío para desvincular):`, current || '');
+            if (telegramID === null) return;
+            try {
+                const res = await fetch('/users/telegram', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id, telegramID: telegramID.trim() })
+                });
+                if (res.ok) {
+                    showMessage('usersMessage', 'Telegram ID actualizado', true);
+                    await loadUsers();
+                } else {
+                    const err = await res.json();
+                    showMessage('usersMessage', err.error || 'No se pudo actualizar', false);
+                }
+            } catch (e) {
+                showMessage('usersMessage', 'Error de red', false);
+            }
+        }
+
+        async function resetUserPassword(id, username) {
+            const password = prompt(`Nueva contraseña para "${username}":`);
+            if (!password) return;
+            try {
+                const res = await fetch('/users/password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id, password })
+                });
+                if (res.ok) {
+                    showMessage('usersMessage', 'Contraseña actualizada', true);
+                } else {
+                    const err = await res.json();
+                    showMessage('usersMessage', err.error || 'No se pudo actualizar', false);
+                }
+            } catch (e) {
+                showMessage('usersMessage', 'Error de red', false);
+            }
+        }
+
         // --- Theme Management ---
         const themeSelect = document.getElementById('themeSelect');
         const currentTheme = localStorage.getItem('theme') || 'system';
@@ -934,11 +1043,36 @@
         document.getElementById('newCategory').addEventListener('keypress', e => e.key === 'Enter' && addCategory());
         document.getElementById('newCard').addEventListener('keypress', e => e.key === 'Enter' && addCard());
 
+        document.getElementById('addUserForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const payload = {
+                username: document.getElementById('newUsername').value,
+                password: document.getElementById('newUserPassword').value,
+                isAdmin: document.getElementById('newUserIsAdmin').checked,
+                telegramID: document.getElementById('newUserTelegramID').value.trim()
+            };
+            try {
+                const res = await fetch('/users', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (res.ok) {
+                    showMessage('usersMessage', 'Usuario creado', true);
+                    document.getElementById('addUserForm').reset();
+                    await loadUsers();
+                } else {
+                    const err = await res.json();
+                    showMessage('usersMessage', err.error || 'No se pudo crear el usuario', false);
+                }
+            } catch (err) {
+                showMessage('usersMessage', 'Error de red', false);
+            }
+        });
+
         document.getElementById('recurringExpenseForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const isGain = document.getElementById('recurringReportGain').checked;
-            let amount = parseFloat(document.getElementById('recurringAmount').value);
-            if (!isGain) amount *= -1;
+            const amount = -Math.abs(parseFloat(document.getElementById('recurringAmount').value));
 
             const formData = {
                 name: document.getElementById('recurringName').value,
@@ -974,6 +1108,7 @@
         });
 
         document.addEventListener('DOMContentLoaded', initialize);
+        document.addEventListener('DOMContentLoaded', setupUserManagement);
         window.removeCategory = removeCategory;
         window.removeCard = removeCard;
         window.showRecurringDeleteModal = showRecurringDeleteModal;

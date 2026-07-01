@@ -2,11 +2,13 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/tanq16/expenseowl/internal/auth"
 	"github.com/tanq16/expenseowl/internal/storage"
 )
 
@@ -16,7 +18,14 @@ func newCardHandler(t *testing.T) *Handler {
 	if err != nil {
 		t.Fatalf("InitializeJsonStore: %v", err)
 	}
-	return NewHandler(s)
+	return NewHandler(s, auth.NewSessionStore())
+}
+
+// asAdmin returns a copy of req carrying an admin user in its context, as the
+// auth middleware would inject for an authenticated admin.
+func asAdmin(req *http.Request) *http.Request {
+	admin := storage.User{ID: "admin-id", Username: "admin", IsAdmin: true}
+	return req.WithContext(context.WithValue(req.Context(), userContextKey, admin))
 }
 
 func TestGetCardsHandlerReturnsCards(t *testing.T) {
@@ -42,7 +51,7 @@ func TestGetCardsHandlerReturnsCards(t *testing.T) {
 func TestUpdateCardsHandlerPersists(t *testing.T) {
 	h := newCardHandler(t)
 	body, _ := json.Marshal([]string{"Visa", "Cash"})
-	req := httptest.NewRequest(http.MethodPut, "/cards/edit", bytes.NewReader(body))
+	req := asAdmin(httptest.NewRequest(http.MethodPut, "/cards/edit", bytes.NewReader(body)))
 	rec := httptest.NewRecorder()
 	h.UpdateCards(rec, req)
 	if rec.Code != http.StatusOK {

@@ -56,13 +56,26 @@ const (
 		cards TEXT
 	);`
 
+	createUsersTableSQL = `
+	CREATE TABLE IF NOT EXISTS users (
+		id VARCHAR(36) PRIMARY KEY,
+		username VARCHAR(255) NOT NULL UNIQUE,
+		password_hash TEXT NOT NULL,
+		is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+		telegram_id TEXT,
+		created_at TIMESTAMPTZ NOT NULL
+	);`
+
 	// migrations for databases created before the "card"/"cards" columns existed.
 	// CREATE TABLE IF NOT EXISTS won't add columns to a pre-existing table, so we
-	// add them idempotently here.
-	migrateCardColumnsSQL = `
+	// add them idempotently here. Same applies to the per-user "user_id" columns.
+	migrateColumnsSQL = `
 	ALTER TABLE expenses ADD COLUMN IF NOT EXISTS card TEXT;
 	ALTER TABLE recurring_expenses ADD COLUMN IF NOT EXISTS card TEXT;
-	ALTER TABLE config ADD COLUMN IF NOT EXISTS cards TEXT;`
+	ALTER TABLE config ADD COLUMN IF NOT EXISTS cards TEXT;
+	ALTER TABLE expenses ADD COLUMN IF NOT EXISTS user_id TEXT;
+	ALTER TABLE recurring_expenses ADD COLUMN IF NOT EXISTS user_id TEXT;
+	ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_id TEXT;`
 )
 
 func InitializePostgresStore(baseConfig SystemConfig) (Storage, error) {
@@ -87,7 +100,7 @@ func makeDBURL(baseConfig SystemConfig) string {
 }
 
 func createTables(db *sql.DB) error {
-	for _, query := range []string{createExpensesTableSQL, createRecurringExpensesTableSQL, createConfigTableSQL, migrateCardColumnsSQL} {
+	for _, query := range []string{createExpensesTableSQL, createRecurringExpensesTableSQL, createConfigTableSQL, createUsersTableSQL, migrateColumnsSQL} {
 		if _, err := db.Exec(query); err != nil {
 			return err
 		}
@@ -97,6 +110,146 @@ func createTables(db *sql.DB) error {
 
 func (s *databaseStore) Close() error {
 	return s.db.Close()
+}
+
+// ------------------------------------------------------------
+// Users
+// ------------------------------------------------------------
+
+func (s *databaseStore) CreateUser(user User) error {
+	if user.ID == "" {
+		user.ID = uuid.New().String()
+	}
+	if user.CreatedAt.IsZero() {
+		user.CreatedAt = time.Now()
+	}
+	query := `INSERT INTO users (id, username, password_hash, is_admin, telegram_id, created_at) VALUES ($1, $2, $3, $4, $5, $6)`
+	_, err := s.db.Exec(query, user.ID, user.Username, user.PasswordHash, user.IsAdmin, nullString(user.TelegramID), user.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("failed to create user: %v", err)
+	}
+	return nil
+}
+
+// nullString maps an empty string to SQL NULL so the unique-ish telegram_id
+// column stays sparse rather than storing many empty strings.
+func nullString(s string) sql.NullString {
+	return sql.NullString{String: s, Valid: s != ""}
+}
+
+func scanUser(scanner interface{ Scan(...any) error }) (User, error) {
+	var u User
+	var telegramID sql.NullString
+	err := scanner.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.IsAdmin, &telegramID, &u.CreatedAt)
+	if telegramID.Valid {
+		u.TelegramID = telegramID.String
+	}
+	return u, err
+}
+
+func (s *databaseStore) GetUserByUsername(username string) (User, error) {
+	query := `SELECT id, username, password_hash, is_admin, telegram_id, created_at FROM users WHERE username = $1`
+	u, err := scanUser(s.db.QueryRow(query, username))
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return User{}, fmt.Errorf("user '%s' not found", username)
+		}
+		return User{}, fmt.Errorf("failed to get user: %v", err)
+	}
+	return u, nil
+}
+
+func (s *databaseStore) GetUserByID(id string) (User, error) {
+	query := `SELECT id, username, password_hash, is_admin, telegram_id, created_at FROM users WHERE id = $1`
+	u, err := scanUser(s.db.QueryRow(query, id))
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return User{}, fmt.Errorf("user with ID %s not found", id)
+		}
+		return User{}, fmt.Errorf("failed to get user: %v", err)
+	}
+	return u, nil
+}
+
+func (s *databaseStore) GetUserByTelegramID(telegramID string) (User, error) {
+	if telegramID == "" {
+		return User{}, fmt.Errorf("telegram ID cannot be empty")
+	}
+	query := `SELECT id, username, password_hash, is_admin, telegram_id, created_at FROM users WHERE telegram_id = $1`
+	u, err := scanUser(s.db.QueryRow(query, telegramID))
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return User{}, fmt.Errorf("user with Telegram ID %s not found", telegramID)
+		}
+		return User{}, fmt.Errorf("failed to get user: %v", err)
+	}
+	return u, nil
+}
+
+func (s *databaseStore) ListUsers() ([]User, error) {
+	query := `SELECT id, username, password_hash, is_admin, telegram_id, created_at FROM users ORDER BY created_at`
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query users: %v", err)
+	}
+	defer rows.Close()
+	var users []User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan user: %v", err)
+		}
+		users = append(users, u)
+	}
+	return users, nil
+}
+
+func (s *databaseStore) UpdateUserPassword(id, passwordHash string) error {
+	res, err := s.db.Exec(`UPDATE users SET password_hash = $1 WHERE id = $2`, passwordHash, id)
+	if err != nil {
+		return fmt.Errorf("failed to update password: %v", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("user with ID %s not found", id)
+	}
+	return nil
+}
+
+func (s *databaseStore) UpdateUserTelegramID(id, telegramID string) error {
+	if telegramID != "" {
+		var existing string
+		err := s.db.QueryRow(`SELECT id FROM users WHERE telegram_id = $1`, telegramID).Scan(&existing)
+		if err == nil && existing != id {
+			return fmt.Errorf("Telegram ID %s is already linked to another user", telegramID)
+		} else if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("failed to check telegram id: %v", err)
+		}
+	}
+	res, err := s.db.Exec(`UPDATE users SET telegram_id = $1 WHERE id = $2`, nullString(telegramID), id)
+	if err != nil {
+		return fmt.Errorf("failed to update telegram id: %v", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("user with ID %s not found", id)
+	}
+	return nil
+}
+
+func (s *databaseStore) DeleteUser(id string) error {
+	res, err := s.db.Exec(`DELETE FROM users WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete user: %v", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("user with ID %s not found", id)
+	}
+	return nil
+}
+
+func (s *databaseStore) CountUsers() (int, error) {
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count)
+	return count, err
 }
 
 func (s *databaseStore) saveConfig(config *Config) error {
@@ -245,7 +398,8 @@ func scanExpense(scanner interface{ Scan(...any) error }) (Expense, error) {
 	var tagsStr sql.NullString
 	var recurringID sql.NullString
 	var card sql.NullString
-	err := scanner.Scan(&expense.ID, &recurringID, &expense.Name, &expense.Category, &expense.Amount, &expense.Currency, &expense.Date, &tagsStr, &card)
+	var userID sql.NullString
+	err := scanner.Scan(&expense.ID, &recurringID, &expense.Name, &expense.Category, &expense.Amount, &expense.Currency, &expense.Date, &tagsStr, &card, &userID)
 	if err != nil {
 		return Expense{}, err
 	}
@@ -254,6 +408,9 @@ func scanExpense(scanner interface{ Scan(...any) error }) (Expense, error) {
 	}
 	if card.Valid {
 		expense.Card = card.String
+	}
+	if userID.Valid {
+		expense.UserID = userID.String
 	}
 	if tagsStr.Valid && tagsStr.String != "" {
 		if err := json.Unmarshal([]byte(tagsStr.String), &expense.Tags); err != nil {
@@ -264,7 +421,7 @@ func scanExpense(scanner interface{ Scan(...any) error }) (Expense, error) {
 }
 
 func (s *databaseStore) GetAllExpenses() ([]Expense, error) {
-	query := `SELECT id, recurring_id, name, category, amount, currency, date, tags, card FROM expenses ORDER BY date DESC`
+	query := `SELECT id, recurring_id, name, category, amount, currency, date, tags, card, user_id FROM expenses ORDER BY date DESC`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query expenses: %v", err)
@@ -283,7 +440,7 @@ func (s *databaseStore) GetAllExpenses() ([]Expense, error) {
 }
 
 func (s *databaseStore) GetExpense(id string) (Expense, error) {
-	query := `SELECT id, recurring_id, name, category, amount, currency, date, tags, card FROM expenses WHERE id = $1`
+	query := `SELECT id, recurring_id, name, category, amount, currency, date, tags, card, user_id FROM expenses WHERE id = $1`
 	expense, err := scanExpense(s.db.QueryRow(query, id))
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -309,10 +466,10 @@ func (s *databaseStore) AddExpense(expense Expense) error {
 		return err
 	}
 	query := `
-		INSERT INTO expenses (id, recurring_id, name, category, amount, currency, date, tags, card)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO expenses (id, recurring_id, name, category, amount, currency, date, tags, card, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
-	_, err = s.db.Exec(query, expense.ID, expense.RecurringID, expense.Name, expense.Category, expense.Amount, expense.Currency, expense.Date, string(tagsJSON), expense.Card)
+	_, err = s.db.Exec(query, expense.ID, expense.RecurringID, expense.Name, expense.Category, expense.Amount, expense.Currency, expense.Date, string(tagsJSON), expense.Card, expense.UserID)
 	return err
 }
 
@@ -327,10 +484,10 @@ func (s *databaseStore) UpdateExpense(id string, expense Expense) error {
 	}
 	query := `
 		UPDATE expenses
-		SET name = $1, category = $2, amount = $3, currency = $4, date = $5, tags = $6, recurring_id = $7, card = $8
-		WHERE id = $9
+		SET name = $1, category = $2, amount = $3, currency = $4, date = $5, tags = $6, recurring_id = $7, card = $8, user_id = $9
+		WHERE id = $10
 	`
-	result, err := s.db.Exec(query, expense.Name, expense.Category, expense.Amount, expense.Currency, expense.Date, string(tagsJSON), expense.RecurringID, expense.Card, id)
+	result, err := s.db.Exec(query, expense.Name, expense.Category, expense.Amount, expense.Currency, expense.Date, string(tagsJSON), expense.RecurringID, expense.Card, expense.UserID, id)
 	if err != nil {
 		return fmt.Errorf("failed to update expense: %v", err)
 	}
@@ -389,12 +546,16 @@ func scanRecurringExpense(scanner interface{ Scan(...any) error }) (RecurringExp
 	var re RecurringExpense
 	var tagsStr sql.NullString
 	var card sql.NullString
-	err := scanner.Scan(&re.ID, &re.Name, &re.Amount, &re.Currency, &re.Category, &re.StartDate, &re.Interval, &re.Occurrences, &tagsStr, &card)
+	var userID sql.NullString
+	err := scanner.Scan(&re.ID, &re.Name, &re.Amount, &re.Currency, &re.Category, &re.StartDate, &re.Interval, &re.Occurrences, &tagsStr, &card, &userID)
 	if err != nil {
 		return RecurringExpense{}, err
 	}
 	if card.Valid {
 		re.Card = card.String
+	}
+	if userID.Valid {
+		re.UserID = userID.String
 	}
 	if tagsStr.Valid && tagsStr.String != "" {
 		if err := json.Unmarshal([]byte(tagsStr.String), &re.Tags); err != nil {
@@ -405,7 +566,7 @@ func scanRecurringExpense(scanner interface{ Scan(...any) error }) (RecurringExp
 }
 
 func (s *databaseStore) GetRecurringExpenses() ([]RecurringExpense, error) {
-	query := `SELECT id, name, amount, currency, category, start_date, interval, occurrences, tags, card FROM recurring_expenses`
+	query := `SELECT id, name, amount, currency, category, start_date, interval, occurrences, tags, card, user_id FROM recurring_expenses`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query recurring expenses: %v", err)
@@ -423,7 +584,7 @@ func (s *databaseStore) GetRecurringExpenses() ([]RecurringExpense, error) {
 }
 
 func (s *databaseStore) GetRecurringExpense(id string) (RecurringExpense, error) {
-	query := `SELECT id, name, amount, currency, category, start_date, interval, occurrences, tags, card FROM recurring_expenses WHERE id = $1`
+	query := `SELECT id, name, amount, currency, category, start_date, interval, occurrences, tags, card, user_id FROM recurring_expenses WHERE id = $1`
 	re, err := scanRecurringExpense(s.db.QueryRow(query, id))
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -449,24 +610,24 @@ func (s *databaseStore) AddRecurringExpense(recurringExpense RecurringExpense) e
 	}
 	tagsJSON, _ := json.Marshal(recurringExpense.Tags)
 	ruleQuery := `
-		INSERT INTO recurring_expenses (id, name, amount, currency, category, start_date, interval, occurrences, tags, card)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO recurring_expenses (id, name, amount, currency, category, start_date, interval, occurrences, tags, card, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`
-	_, err = tx.Exec(ruleQuery, recurringExpense.ID, recurringExpense.Name, recurringExpense.Amount, recurringExpense.Currency, recurringExpense.Category, recurringExpense.StartDate, recurringExpense.Interval, recurringExpense.Occurrences, string(tagsJSON), recurringExpense.Card)
+	_, err = tx.Exec(ruleQuery, recurringExpense.ID, recurringExpense.Name, recurringExpense.Amount, recurringExpense.Currency, recurringExpense.Category, recurringExpense.StartDate, recurringExpense.Interval, recurringExpense.Occurrences, string(tagsJSON), recurringExpense.Card, recurringExpense.UserID)
 	if err != nil {
 		return fmt.Errorf("failed to insert recurring expense rule: %v", err)
 	}
 
 	expensesToAdd := generateExpensesFromRecurring(recurringExpense, false)
 	if len(expensesToAdd) > 0 {
-		stmt, err := tx.Prepare(pq.CopyIn("expenses", "id", "recurring_id", "name", "category", "amount", "currency", "date", "tags", "card"))
+		stmt, err := tx.Prepare(pq.CopyIn("expenses", "id", "recurring_id", "name", "category", "amount", "currency", "date", "tags", "card", "user_id"))
 		if err != nil {
 			return fmt.Errorf("failed to prepare copy in: %v", err)
 		}
 		defer stmt.Close()
 		for _, exp := range expensesToAdd {
 			expTagsJSON, _ := json.Marshal(exp.Tags)
-			_, err = stmt.Exec(exp.ID, exp.RecurringID, exp.Name, exp.Category, exp.Amount, exp.Currency, exp.Date, string(expTagsJSON), exp.Card)
+			_, err = stmt.Exec(exp.ID, exp.RecurringID, exp.Name, exp.Category, exp.Amount, exp.Currency, exp.Date, string(expTagsJSON), exp.Card, exp.UserID)
 			if err != nil {
 				return fmt.Errorf("failed to execute copy in: %v", err)
 			}
@@ -491,10 +652,10 @@ func (s *databaseStore) UpdateRecurringExpense(id string, recurringExpense Recur
 	tagsJSON, _ := json.Marshal(recurringExpense.Tags)
 	ruleQuery := `
 		UPDATE recurring_expenses
-		SET name = $1, amount = $2, category = $3, start_date = $4, interval = $5, occurrences = $6, tags = $7, currency = $8, card = $9
-		WHERE id = $10
+		SET name = $1, amount = $2, category = $3, start_date = $4, interval = $5, occurrences = $6, tags = $7, currency = $8, card = $9, user_id = $10
+		WHERE id = $11
 	`
-	res, err := tx.Exec(ruleQuery, recurringExpense.Name, recurringExpense.Amount, recurringExpense.Category, recurringExpense.StartDate, recurringExpense.Interval, recurringExpense.Occurrences, string(tagsJSON), recurringExpense.Currency, recurringExpense.Card, id)
+	res, err := tx.Exec(ruleQuery, recurringExpense.Name, recurringExpense.Amount, recurringExpense.Category, recurringExpense.StartDate, recurringExpense.Interval, recurringExpense.Occurrences, string(tagsJSON), recurringExpense.Currency, recurringExpense.Card, recurringExpense.UserID, id)
 	if err != nil {
 		return fmt.Errorf("failed to update recurring expense rule: %v", err)
 	}
@@ -517,14 +678,14 @@ func (s *databaseStore) UpdateRecurringExpense(id string, recurringExpense Recur
 
 	expensesToAdd := generateExpensesFromRecurring(recurringExpense, !updateAll)
 	if len(expensesToAdd) > 0 {
-		stmt, err := tx.Prepare(pq.CopyIn("expenses", "id", "recurring_id", "name", "category", "amount", "currency", "date", "tags", "card"))
+		stmt, err := tx.Prepare(pq.CopyIn("expenses", "id", "recurring_id", "name", "category", "amount", "currency", "date", "tags", "card", "user_id"))
 		if err != nil {
 			return fmt.Errorf("failed to prepare copy in for update: %v", err)
 		}
 		defer stmt.Close()
 		for _, exp := range expensesToAdd {
 			expTagsJSON, _ := json.Marshal(exp.Tags)
-			_, err = stmt.Exec(exp.ID, exp.RecurringID, exp.Name, exp.Category, exp.Amount, exp.Currency, exp.Date, string(expTagsJSON), exp.Card)
+			_, err = stmt.Exec(exp.ID, exp.RecurringID, exp.Name, exp.Category, exp.Amount, exp.Currency, exp.Date, string(expTagsJSON), exp.Card, exp.UserID)
 			if err != nil {
 				return fmt.Errorf("failed to execute copy in for update: %v", err)
 			}
@@ -597,6 +758,7 @@ func generateExpensesFromRecurring(recExp RecurringExpense, fromToday bool) []Ex
 	for range limit {
 		expense := Expense{
 			ID:          uuid.New().String(),
+			UserID:      recExp.UserID,
 			RecurringID: recExp.ID,
 			Name:        recExp.Name,
 			Category:    recExp.Category,

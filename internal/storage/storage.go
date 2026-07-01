@@ -13,6 +13,17 @@ type Storage interface {
 	Close() error
 	GetConfig() (*Config, error)
 
+	// Users
+	CreateUser(user User) error
+	GetUserByUsername(username string) (User, error)
+	GetUserByID(id string) (User, error)
+	GetUserByTelegramID(telegramID string) (User, error)
+	ListUsers() ([]User, error)
+	UpdateUserPassword(id, passwordHash string) error
+	UpdateUserTelegramID(id, telegramID string) error
+	DeleteUser(id string) error
+	CountUsers() (int, error)
+
 	// Basic Config Updates
 	GetCategories() ([]string, error)
 	UpdateCategories(categories []string) error
@@ -56,8 +67,20 @@ type Config struct {
 	// Tags              []string           `json:"tags"`
 }
 
+// User is an application account. PasswordHash is persisted to storage but
+// must never be exposed through the API (handlers return a sanitized DTO).
+type User struct {
+	ID           string    `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"passwordHash"`
+	IsAdmin      bool      `json:"isAdmin"`
+	TelegramID   string    `json:"telegramID"` // chat.id linked by an admin; lets the bot attribute expenses
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
 type RecurringExpense struct {
 	ID          string    `json:"id"`
+	UserID      string    `json:"userID"`
 	Name        string    `json:"name"`
 	Amount      float64   `json:"amount"`
 	Currency    string    `json:"currency"`
@@ -88,6 +111,7 @@ type SystemConfig struct {
 // expense struct
 type Expense struct {
 	ID          string    `json:"id"`
+	UserID      string    `json:"userID"`
 	RecurringID string    `json:"recurringID"`
 	Name        string    `json:"name"`
 	Tags        []string  `json:"tags"`
@@ -252,7 +276,6 @@ var defaultCategories = []string{
 	"Healthcare",
 	"Shopping",
 	"Miscellaneous",
-	"Income",
 }
 
 var SupportedCurrencies = []string{
