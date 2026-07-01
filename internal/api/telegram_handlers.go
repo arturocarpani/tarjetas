@@ -296,6 +296,14 @@ func (h *Handler) handleCallback(cq *telegram.CallbackQuery) {
 		editText, editMarkup, doEdit = cardMenuText(p), cardKeyboard(p.cards), true
 	case data == "menu:cat":
 		editText, editMarkup, doEdit = summaryText(p), catKeyboard(p.categories), true
+	case data == "menu:cur":
+		editText, editMarkup, doEdit = summaryText(p), curKeyboard(), true
+	case data == "pick:cur:ars":
+		p.exp.Currency = "ars"
+		editText, editMarkup, doEdit = summaryText(p), mainKeyboard(), true
+	case data == "pick:cur:usd":
+		p.exp.Currency = "usd"
+		editText, editMarkup, doEdit = summaryText(p), mainKeyboard(), true
 	case data == "pick:card:none":
 		p.exp.Card = ""
 		editText, editMarkup, doEdit = summaryText(p), mainKeyboard(), true
@@ -337,7 +345,9 @@ func (h *Handler) handleCallback(cq *telegram.CallbackQuery) {
 
 func (h *Handler) saveConfirmed(chatID int64, msgID int, p *pendingExpense) {
 	p.exp.UserID = p.userID
-	p.exp.Currency = p.currency
+	if p.exp.Currency == "" {
+		p.exp.Currency = p.currency
+	}
 	if err := p.exp.Validate(); err != nil {
 		h.telegram.EditMessagePlain(chatID, msgID, fmt.Sprintf("El gasto no es válido: %s", err.Error()))
 		return
@@ -548,9 +558,13 @@ func summaryText(p *pendingExpense) string {
 	if card == "" {
 		card = "(sin asignar)"
 	}
+	currency := p.exp.Currency
+	if currency == "" {
+		currency = p.currency
+	}
 	return fmt.Sprintf(
-		"Revisá el gasto y confirmá:\n• Concepto: %s\n• Monto: %.2f\n• Categoría: %s\n• Fecha: %s\n• Tarjeta: %s",
-		p.exp.Name, p.exp.Amount, p.exp.Category, p.exp.Date.Format("2006-01-02"), card,
+		"Revisá el gasto y confirmá:\n• Concepto: %s\n• Monto: %.2f\n• Categoría: %s\n• Fecha: %s\n• Tarjeta: %s\n• Moneda: %s",
+		p.exp.Name, p.exp.Amount, p.exp.Category, p.exp.Date.Format("2006-01-02"), card, strings.ToUpper(currency),
 	)
 }
 
@@ -573,6 +587,14 @@ func mainKeyboard() telegram.InlineKeyboardMarkup {
 		{{Text: "✅ Guardar", CallbackData: "save"}, {Text: "❌ Cancelar", CallbackData: "cancel"}},
 		{{Text: "💳 Tarjeta", CallbackData: "menu:card"}, {Text: "🏷️ Categoría", CallbackData: "menu:cat"}},
 		{{Text: "✏️ Concepto", CallbackData: "ask:concept"}, {Text: "📅 Fecha", CallbackData: "ask:date"}},
+		{{Text: "💱 Moneda", CallbackData: "menu:cur"}},
+	}}
+}
+
+func curKeyboard() telegram.InlineKeyboardMarkup {
+	return telegram.InlineKeyboardMarkup{InlineKeyboard: [][]telegram.InlineKeyboardButton{
+		{{Text: "Pesos (ARS)", CallbackData: "pick:cur:ars"}, {Text: "Dólares (USD)", CallbackData: "pick:cur:usd"}},
+		{{Text: "⬅️ Volver", CallbackData: "menu:main"}},
 	}}
 }
 
@@ -617,7 +639,7 @@ func parseISODate(s string) (time.Time, bool) {
 }
 
 func formatConfirmation(e storage.Expense) string {
-	line := fmt.Sprintf("✅ Registrado: %s — %.2f — %s", e.Name, e.Amount, e.Category)
+	line := fmt.Sprintf("✅ Registrado: %s — %.2f %s — %s", e.Name, e.Amount, strings.ToUpper(e.Currency), e.Category)
 	if e.Card != "" {
 		line += " (" + e.Card + ")"
 	}
