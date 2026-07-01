@@ -37,8 +37,8 @@ const currencyBehaviors = {
     mad: {symbol: "DH", useComma: false, useDecimals: true, useSpace: true, right: true},
 };
 
-function formatCurrency(amount) {
-    const behavior = currencyBehaviors[currentCurrency] || {
+function formatCurrency(amount, code) {
+    const behavior = currencyBehaviors[code || currentCurrency] || {
         symbol: "$",
         useComma: false,
         useDecimals: true,
@@ -56,6 +56,26 @@ function formatCurrency(amount) {
         ? `${formattedAmount}${behavior.useSpace ? " " : ""}${behavior.symbol}`
         : `${behavior.symbol}${behavior.useSpace ? " " : ""}${formattedAmount}`;
     return isNegative ? `-${result}` : result;
+}
+
+// sumByCurrency groups the absolute value of expense amounts by their currency
+// code (falling back to the configured currency for older records).
+function sumByCurrency(expenses) {
+    const totals = {};
+    (expenses || []).forEach(e => {
+        if (e.amount < 0) {
+            const c = e.currency || currentCurrency;
+            totals[c] = (totals[c] || 0) + Math.abs(e.amount);
+        }
+    });
+    return totals;
+}
+
+// fmtByCurrency renders a per-currency totals object as "USD 100 · ARS 50.000".
+function fmtByCurrency(totals) {
+    const codes = Object.keys(totals);
+    if (codes.length === 0) return formatCurrency(0);
+    return codes.sort().map(c => formatCurrency(totals[c], c)).join(' · ');
 }
 
 function getUserTimeZone() {
