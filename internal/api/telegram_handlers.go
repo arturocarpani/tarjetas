@@ -29,6 +29,7 @@ type pendingExpense struct {
 	mediaType  string
 	awaiting   string // "" | "concept" | "date": what free-text reply we expect next
 	messageID  int    // the bot message that carries the keyboard, so we can edit it
+	editingID  string // non-empty when editing an already-saved expense (UpdateExpense instead of AddExpense)
 }
 
 // tgPendingStore keeps one in-flight confirmation per chat. In-memory (lost on
@@ -229,6 +230,17 @@ func (h *Handler) handleCallback(cq *telegram.CallbackQuery) {
 		return
 	}
 	chatID := cq.Message.Chat.ID
+	data := cq.Data
+
+	// Post-save actions operate on an already-saved expense (no pending state).
+	if strings.HasPrefix(data, "del:") {
+		h.handleDeleteCallback(chatID, cq.Message.MessageID, strings.TrimPrefix(data, "del:"))
+		return
+	}
+	if strings.HasPrefix(data, "edit:") {
+		h.handleEditStart(chatID, cq.Message.MessageID, strings.TrimPrefix(data, "edit:"))
+		return
+	}
 
 	h.tgPending.mu.Lock()
 	p := h.tgPending.m[chatID]
@@ -237,8 +249,6 @@ func (h *Handler) handleCallback(cq *telegram.CallbackQuery) {
 		h.reply(chatID, "Esta confirmación expiró. Mandá el gasto de nuevo.")
 		return
 	}
-
-	data := cq.Data
 	var (
 		toSave     *pendingExpense
 		editText   string
@@ -307,26 +317,108 @@ func (h *Handler) saveConfirmed(chatID int64, msgID int, p *pendingExpense) {
 		h.telegram.EditMessagePlain(chatID, msgID, fmt.Sprintf("El gasto no es válido: %s", err.Error()))
 		return
 	}
-	// Persist the receipt image (if any) as backup, naming it after the expense
-	// ID we assign here so AddExpense keeps it.
-	if len(p.image) > 0 && h.receiptsDir != "" {
+
+	if p.editingID != "" {
+		// Editing an already-saved expense.
+		p.exp.ID = p.editingID
+		if err := h.storage.UpdateExpense(p.editingID, p.exp); err != nil {
+			log.Printf("TELEGRAM ERROR: update: %v\n", err)
+			h.telegram.EditMessagePlain(chatID, msgID, "No pude actualizar el gasto. Probá de nuevo.")
+			return
+		}
+	} else {
+		// New expense. Assign the ID up front so we can name the receipt file and
+		// attach delete/edit buttons to the confirmation.
 		if p.exp.ID == "" {
 			p.exp.ID = uuid.New().String()
 		}
-		if name, err := h.saveReceipt(p.exp.ID, p.image, p.mediaType); err != nil {
-			log.Printf("TELEGRAM ERROR: save receipt: %v\n", err)
-		} else {
-			p.exp.ReceiptPath = name
+		if len(p.image) > 0 && h.receiptsDir != "" {
+			if name, err := h.saveReceipt(p.exp.ID, p.image, p.mediaType); err != nil {
+				log.Printf("TELEGRAM ERROR: save receipt: %v\n", err)
+			} else {
+				p.exp.ReceiptPath = name
+			}
+		}
+		if err := h.storage.AddExpense(p.exp); err != nil {
+			log.Printf("TELEGRAM ERROR: save: %v\n", err)
+			h.telegram.EditMessagePlain(chatID, msgID, "No pude guardar el gasto. Probá de nuevo.")
+			return
 		}
 	}
-	if err := h.storage.AddExpense(p.exp); err != nil {
-		log.Printf("TELEGRAM ERROR: save: %v\n", err)
-		h.telegram.EditMessagePlain(chatID, msgID, "No pude guardar el gasto. Probá de nuevo.")
-		return
-	}
-	if err := h.telegram.EditMessagePlain(chatID, msgID, formatConfirmation(p.exp)); err != nil {
+	if err := h.telegram.EditMessageText(chatID, msgID, formatConfirmation(p.exp), postSaveKeyboard(p.exp.ID)); err != nil {
 		log.Printf("TELEGRAM ERROR: edit confirm: %v\n", err)
 	}
+}
+
+func (h *Handler) handleDeleteCallback(chatID int64, msgID int, id string) {
+	user, ok := h.resolveUserByChat(chatID)
+	if !ok {
+		return
+	}
+	exp, err := h.storage.GetExpense(id)
+	if err != nil {
+		h.telegram.EditMessagePlain(chatID, msgID, "No encontré el gasto (quizá ya lo borraste).")
+		return
+	}
+	if !user.IsAdmin && exp.UserID != user.ID {
+		h.telegram.EditMessagePlain(chatID, msgID, "No podés borrar este gasto.")
+		return
+	}
+	if exp.ReceiptPath != "" {
+		h.deleteReceipt(exp.ReceiptPath)
+	}
+	if err := h.storage.RemoveExpense(id); err != nil {
+		log.Printf("TELEGRAM ERROR: delete: %v\n", err)
+		h.telegram.EditMessagePlain(chatID, msgID, "No pude borrar el gasto. Probá de nuevo.")
+		return
+	}
+	h.telegram.EditMessagePlain(chatID, msgID, fmt.Sprintf("🗑️ Borrado: %s — %.2f — %s", exp.Name, exp.Amount, exp.Category))
+}
+
+func (h *Handler) handleEditStart(chatID int64, msgID int, id string) {
+	user, ok := h.resolveUserByChat(chatID)
+	if !ok {
+		return
+	}
+	exp, err := h.storage.GetExpense(id)
+	if err != nil {
+		h.telegram.EditMessagePlain(chatID, msgID, "No encontré el gasto.")
+		return
+	}
+	if !user.IsAdmin && exp.UserID != user.ID {
+		h.telegram.EditMessagePlain(chatID, msgID, "No podés editar este gasto.")
+		return
+	}
+	categories, err := h.storage.GetCategories()
+	if err != nil {
+		h.telegram.EditMessagePlain(chatID, msgID, "Error interno al leer las categorías.")
+		return
+	}
+	cards, _ := h.storage.GetCards()
+	currency, _ := h.storage.GetCurrency()
+	p := &pendingExpense{
+		exp:        exp,
+		userID:     user.ID,
+		cards:      cards,
+		categories: categories,
+		currency:   currency,
+		messageID:  msgID,
+		editingID:  id,
+	}
+	h.tgPending.mu.Lock()
+	h.tgPending.m[chatID] = p
+	h.tgPending.mu.Unlock()
+	if err := h.telegram.EditMessageText(chatID, msgID, summaryText(p), mainKeyboard()); err != nil {
+		log.Printf("TELEGRAM ERROR: edit start: %v\n", err)
+	}
+}
+
+func (h *Handler) resolveUserByChat(chatID int64) (storage.User, bool) {
+	user, err := h.storage.GetUserByTelegramID(fmt.Sprintf("%d", chatID))
+	if err != nil {
+		return storage.User{}, false
+	}
+	return user, true
 }
 
 // ------------------------------------------------------------
@@ -349,6 +441,13 @@ func cardMenuText(p *pendingExpense) string {
 		return summaryText(p) + "\n\n(No hay tarjetas cargadas. Agregalas en Settings → Tarjetas.)"
 	}
 	return summaryText(p) + "\n\nElegí la tarjeta:"
+}
+
+// postSaveKeyboard attaches delete/edit actions to a saved-expense confirmation.
+func postSaveKeyboard(id string) telegram.InlineKeyboardMarkup {
+	return telegram.InlineKeyboardMarkup{InlineKeyboard: [][]telegram.InlineKeyboardButton{
+		{{Text: "🗑️ Borrar", CallbackData: "del:" + id}, {Text: "✏️ Editar", CallbackData: "edit:" + id}},
+	}}
 }
 
 func mainKeyboard() telegram.InlineKeyboardMarkup {

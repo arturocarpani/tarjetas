@@ -36,6 +36,14 @@ func (h *Handler) saveReceipt(expenseID string, data []byte, mediaType string) (
 	return name, nil
 }
 
+// deleteReceipt removes a stored receipt file (best-effort; ignores errors).
+func (h *Handler) deleteReceipt(name string) {
+	if h.receiptsDir == "" || name == "" {
+		return
+	}
+	_ = os.Remove(filepath.Join(h.receiptsDir, filepath.Base(name)))
+}
+
 // ServeReceipt streams the receipt image for an expense the caller is allowed to
 // see (its owner, or any admin).
 func (h *Handler) ServeReceipt(w http.ResponseWriter, r *http.Request) {
