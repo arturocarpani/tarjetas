@@ -59,7 +59,10 @@
         </div>
 
         <div class="table-controls">
-            <button id="toggleExpenseFormBtn" class="nav-button"><i class="fa-solid fa-plus"></i> Add Expense</button>
+            <button id="toggleExpenseFormBtn" class="nav-button"><i class="fa-solid fa-plus"></i> Agregar gasto</button>
+            <select id="userFilter" class="nav-button" style="display: none;">
+                <option value="">Todos los usuarios</option>
+            </select>
             <select id="cardFilter" class="nav-button">
                 <option value="">Todas las tarjetas</option>
             </select>
@@ -155,6 +158,32 @@
         let selectedTags = new Set();
         let loadedCards = [];
         let currentCardFilter = "";
+        let currentUserFilter = "";
+
+        // Admin-only user filter: fetch /me, and if admin, populate a user dropdown
+        // so the admin can slice the dashboard by employee.
+        async function setupAdminUserFilter() {
+            try {
+                const meRes = await fetch('/me');
+                if (!meRes.ok) return;
+                const me = await meRes.json();
+                if (!me.isAdmin) return;
+                const usersRes = await fetch('/users');
+                if (!usersRes.ok) return;
+                const users = await usersRes.json();
+                const sel = document.getElementById('userFilter');
+                sel.innerHTML = '<option value="">Todos los usuarios</option>' +
+                    (users || []).map(u => `<option value="${escapeHTML(u.id)}">${escapeHTML(u.username)}</option>`).join('');
+                sel.value = currentUserFilter;
+                sel.style.display = '';
+            } catch (e) {
+                console.error('setupAdminUserFilter:', e);
+            }
+        }
+
+        function passesUserFilter(exp) {
+            return currentUserFilter === "" || exp.userID === currentUserFilter;
+        }
 
         function populateCardControls() {
             const cardSelect = document.getElementById('card');
@@ -210,7 +239,7 @@
         }
 
         function updateChartAndLegend() {
-            const allMonthExpenses = getMonthExpenses(allExpenses);
+            const allMonthExpenses = getMonthExpenses(allExpenses).filter(passesUserFilter);
             const monthExpenses = allMonthExpenses.filter(passesCardFilter);
             const chartBox = document.querySelector('.chart-box');
             const legendBox = document.getElementById('customLegend');
@@ -312,7 +341,7 @@
         function updateLegend(categoryData) {
             const legendContainer = document.getElementById('customLegend');
             legendContainer.innerHTML = '';
-            const monthExpenses = getMonthExpenses(allExpenses).filter(passesCardFilter);
+            const monthExpenses = getMonthExpenses(allExpenses).filter(passesUserFilter).filter(passesCardFilter);
             const currentMonthCategories = [...new Set(monthExpenses
                 .filter(exp => exp.amount < 0)
                 .map(exp => exp.category))];
@@ -458,7 +487,7 @@
                 
                 if (value && ![...allTags].map(t => t.toLowerCase()).includes(value)) {
                     const newItem = document.createElement('div');
-                    newItem.textContent = `+ Create "${input.value.trim()}"`;
+                    newItem.textContent = `+ Crear "${input.value.trim()}"`;
                     newItem.className = 'new-tag';
                     newItem.onclick = () => addTag(input.value.trim());
                     dropdown.appendChild(newItem);
@@ -508,16 +537,21 @@
             updateChartAndLegend();
         });
 
+        document.getElementById('userFilter').addEventListener('change', (e) => {
+            currentUserFilter = e.target.value;
+            updateChartAndLegend();
+        });
+
         document.getElementById('toggleExpenseFormBtn').addEventListener('click', function() {
             const formContainer = document.getElementById('addExpenseContainer');
             const isHidden = formContainer.style.display === 'none' || formContainer.style.display === '';
 
             if (isHidden) {
                 formContainer.style.display = 'block';
-                this.innerHTML = '<i class="fa-solid fa-times"></i> Close';
+                this.innerHTML = '<i class="fa-solid fa-times"></i> Cerrar';
             } else {
                 formContainer.style.display = 'none';
-                this.innerHTML = '<i class="fa-solid fa-plus"></i> Add Expense';
+                this.innerHTML = '<i class="fa-solid fa-plus"></i> Agregar gasto';
             }
         });
 
@@ -540,7 +574,7 @@
                 });
                 const messageDiv = document.getElementById('formMessage');
                 if (response.ok) {
-                    messageDiv.textContent = 'Expense added successfully!';
+                    messageDiv.textContent = 'Gasto agregado.';
                     messageDiv.className = 'form-message success';
                     document.getElementById('expenseForm').reset();
                     document.getElementById('selected-tags').innerHTML = '';
@@ -568,6 +602,7 @@
             }
         });
         document.addEventListener('DOMContentLoaded', initialize);
+        document.addEventListener('DOMContentLoaded', setupAdminUserFilter);
 
         document.getElementById('name').addEventListener('click', (e) => {
             if (e.target.value === '-') {
