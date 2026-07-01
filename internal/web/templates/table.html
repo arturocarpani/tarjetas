@@ -49,6 +49,9 @@
             <label for="showAllToggle">
                 <input type="checkbox" id="showAllToggle" class="styled-checkbox"> Ver todas las transacciones
             </label>
+            <select id="userFilter" style="display: none;">
+                <option value="">Todos los usuarios</option>
+            </select>
             <select id="cardFilter">
                 <option value="">Todas las tarjetas</option>
             </select>
@@ -133,6 +136,26 @@
         let selectedTags = new Set();
         let availableCards = [];
         let currentCardFilter = "";
+        let currentUserFilter = "";
+
+        async function setupAdminUserFilter() {
+            try {
+                const meRes = await fetch('/me');
+                if (!meRes.ok) return;
+                const me = await meRes.json();
+                if (!me.isAdmin) return;
+                const usersRes = await fetch('/users');
+                if (!usersRes.ok) return;
+                const users = await usersRes.json();
+                const sel = document.getElementById('userFilter');
+                sel.innerHTML = '<option value="">Todos los usuarios</option>' +
+                    (users || []).map(u => `<option value="${escapeHTML(u.id)}">${escapeHTML(u.username)}</option>`).join('');
+                sel.value = currentUserFilter;
+                sel.style.display = '';
+            } catch (e) {
+                console.error('setupAdminUserFilter:', e);
+            }
+        }
 
         function createTable(expenses) {
             if (!expenses || expenses.length === 0) {
@@ -189,11 +212,18 @@
                 : getMonthExpenses(allExpenses);
 
             expensesForTable = expensesForTable.filter(exp =>
-                currentCardFilter === "" || (currentCardFilter === "__none__" ? !exp.card : exp.card === currentCardFilter)
+                (currentCardFilter === "" || (currentCardFilter === "__none__" ? !exp.card : exp.card === currentCardFilter)) &&
+                (currentUserFilter === "" || exp.userID === currentUserFilter)
             );
 
             const tableContainer = document.getElementById('tableContainer');
-            tableContainer.innerHTML = createTable(expensesForTable);
+            const total = expensesForTable
+                .filter(e => e.amount < 0)
+                .reduce((sum, e) => sum + Math.abs(e.amount), 0);
+            const totalHtml = expensesForTable.length
+                ? `<div class="cashflow-container" style="margin-top:1rem;"><div class="cashflow-item expenses"><div class="cashflow-label">Total (${expensesForTable.length} gastos)</div><div class="cashflow-value">${formatCurrency(total)}</div></div></div>`
+                : '';
+            tableContainer.innerHTML = createTable(expensesForTable) + totalHtml;
         }
 
         function editExpenseByIndex(index) {
@@ -377,6 +407,11 @@
             updateTable();
         });
 
+        document.getElementById('userFilter').addEventListener('change', (e) => {
+            currentUserFilter = e.target.value;
+            updateTable();
+        });
+
         document.getElementById('prevMonth').addEventListener('click', () => {
             currentDate.setMonth(currentDate.getMonth() - 1);
             updateMonthDisplay();
@@ -486,6 +521,7 @@
             }
         });
         document.addEventListener('DOMContentLoaded', initialize);
+        document.addEventListener('DOMContentLoaded', setupAdminUserFilter);
 
         document.getElementById('name').addEventListener('click', (e) => {
             if (e.target.value === '-') {
