@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -27,10 +28,15 @@ type pendingExpense struct {
 	currency   string
 	image      []byte // receipt image bytes, kept until the user confirms
 	mediaType  string
-	awaiting   string // "" | "concept" | "date": what free-text reply we expect next
-	messageID  int    // the bot message that carries the keyboard, so we can edit it
-	editingID  string // non-empty when editing an already-saved expense (UpdateExpense instead of AddExpense)
+	awaiting   string    // "" | "concept" | "date": what free-text reply we expect next
+	messageID  int       // the bot message that carries the keyboard, so we can edit it
+	editingID  string    // non-empty when editing an already-saved expense (UpdateExpense instead of AddExpense)
+	updatedAt  time.Time // for TTL — a stale pending stops capturing later messages
 }
+
+// pendingTTL is how long a pending confirmation keeps capturing follow-up text
+// (e.g. a concept/date edit) before it's considered abandoned.
+const pendingTTL = 20 * time.Minute
 
 // tgPendingStore keeps one in-flight confirmation per chat. In-memory (lost on
 // restart, which only drops half-finished confirmations — acceptable).
@@ -72,7 +78,9 @@ func (h *Handler) TelegramWebhook(w http.ResponseWriter, r *http.Request) {
 	// A secret is mandatory: the route is public, so without a matching
 	// X-Telegram-Bot-Api-Secret-Token header anyone could POST a forged update
 	// for a linked chat.id. An empty configured secret rejects everything.
-	if h.webhookSecret == "" || r.Header.Get("X-Telegram-Bot-Api-Secret-Token") != h.webhookSecret {
+	// Constant-time compare to avoid leaking the secret via timing.
+	provided := r.Header.Get("X-Telegram-Bot-Api-Secret-Token")
+	if h.webhookSecret == "" || subtle.ConstantTimeCompare([]byte(provided), []byte(h.webhookSecret)) != 1 {
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "Invalid secret token"})
 		return
 	}
@@ -179,6 +187,7 @@ func (h *Handler) processUpdate(update telegram.Update) {
 		return
 	}
 	p.messageID = msgID
+	p.updatedAt = time.Now()
 	h.tgPending.mu.Lock()
 	h.tgPending.m[chatID] = p
 	h.tgPending.mu.Unlock()
@@ -193,6 +202,12 @@ func (h *Handler) applyTextEdit(chatID int64, text string) bool {
 		h.tgPending.mu.Unlock()
 		return false
 	}
+	if time.Since(p.updatedAt) > pendingTTL {
+		delete(h.tgPending.m, chatID) // stale → let this message start a new expense
+		h.tgPending.mu.Unlock()
+		return false
+	}
+	p.updatedAt = time.Now()
 	var errMsg string
 	switch p.awaiting {
 	case "concept":
@@ -250,11 +265,13 @@ func (h *Handler) handleCallback(cq *telegram.CallbackQuery) {
 
 	h.tgPending.mu.Lock()
 	p := h.tgPending.m[chatID]
-	if p == nil {
+	if p == nil || time.Since(p.updatedAt) > pendingTTL {
+		delete(h.tgPending.m, chatID)
 		h.tgPending.mu.Unlock()
 		h.reply(chatID, "Esta confirmación expiró. Mandá el gasto de nuevo.")
 		return
 	}
+	p.updatedAt = time.Now()
 	var (
 		toSave     *pendingExpense
 		editText   string
@@ -370,6 +387,7 @@ Después te muestro lo que entendí y podés:
 Y sobre un gasto ya guardado: 🗑️ Borrar o ✏️ Editar.
 
 Comandos:
+/cancelar — descartar el gasto en curso
 /ayuda — esta ayuda`
 
 func (h *Handler) handleCommand(chatID int64, user storage.User, text string) {
@@ -378,6 +396,16 @@ func (h *Handler) handleCommand(chatID int64, user storage.User, text string) {
 	switch cmd {
 	case "/start", "/help", "/ayuda":
 		h.reply(chatID, botHelpText)
+	case "/cancelar", "/cancel":
+		h.tgPending.mu.Lock()
+		_, had := h.tgPending.m[chatID]
+		delete(h.tgPending.m, chatID)
+		h.tgPending.mu.Unlock()
+		if had {
+			h.reply(chatID, "❌ Listo, descarté el gasto en curso.")
+		} else {
+			h.reply(chatID, "No hay ningún gasto en curso.")
+		}
 	default:
 		h.reply(chatID, "Comando no reconocido.\n\n"+botHelpText)
 	}
@@ -437,6 +465,7 @@ func (h *Handler) handleEditStart(chatID int64, msgID int, id string) {
 		currency:   currency,
 		messageID:  msgID,
 		editingID:  id,
+		updatedAt:  time.Now(),
 	}
 	h.tgPending.mu.Lock()
 	h.tgPending.m[chatID] = p

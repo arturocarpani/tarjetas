@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/tanq16/expenseowl/internal/ai"
 	"github.com/tanq16/expenseowl/internal/api"
@@ -196,9 +200,28 @@ func runServer(port int) {
 	http.HandleFunc("/import/csv", handler.RequireAPI(handler.ImportCSV))
 	http.HandleFunc("/import/csvold", handler.RequireAPI(handler.ImportOldCSV))
 
-	log.Println("Starting server on port", port, "...")
-	if err := http.ListenAndServe(fmt.Sprint(":", port), nil); err != nil {
-		log.Fatalf("Server failed to start: %v", err)
+	srv := &http.Server{
+		Addr:              fmt.Sprint(":", port),
+		ReadHeaderTimeout: 15 * time.Second, // Slowloris protection
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      300 * time.Second, // generous for large CSV imports
+		IdleTimeout:       120 * time.Second,
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		log.Println("Starting server on port", port, "...")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed to start: %v", err)
+		}
+	}()
+	<-ctx.Done()
+	stop()
+	log.Println("Shutting down gracefully...")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Shutdown error: %v", err)
 	}
 }
 

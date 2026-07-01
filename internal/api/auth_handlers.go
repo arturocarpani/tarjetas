@@ -41,6 +41,11 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
 		return
 	}
+	ip := clientIP(r)
+	if h.loginLimiter != nil && h.loginLimiter.blocked(ip) {
+		writeJSON(w, http.StatusTooManyRequests, ErrorResponse{Error: "Demasiados intentos. Esperá unos minutos e intentá de nuevo."})
+		return
+	}
 	var creds struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -49,10 +54,18 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})
 		return
 	}
-	user, err := h.storage.GetUserByUsername(creds.Username)
-	if err != nil || !auth.CheckPassword(user.PasswordHash, creds.Password) {
+	// Always run a bcrypt comparison (even for unknown users) to avoid timing
+	// enumeration; GetUserByUsername error → empty hash → VerifyPassword false.
+	user, _ := h.storage.GetUserByUsername(creds.Username)
+	if !auth.VerifyPassword(user.PasswordHash, creds.Password) {
+		if h.loginLimiter != nil {
+			h.loginLimiter.record(ip)
+		}
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "Invalid username or password"})
 		return
+	}
+	if h.loginLimiter != nil {
+		h.loginLimiter.reset(ip)
 	}
 	token, err := h.sessions.Create(user.ID)
 	if err != nil {
@@ -241,6 +254,7 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	// Cascade: remove the user's expenses, recurring rules and receipt files so
 	// they don't linger orphaned (still counted in admin totals, unmanageable).
 	h.cleanupUserData(id)
+	h.sessions.DeleteByUser(id) // kill any active sessions of the deleted user
 	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
 }
 
@@ -306,5 +320,7 @@ func (h *Handler) UpdateUserPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
 	}
+	// Revoke the user's existing sessions so a compromised one dies with the reset.
+	h.sessions.DeleteByUser(req.ID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
 }
