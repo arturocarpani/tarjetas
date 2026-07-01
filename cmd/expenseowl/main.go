@@ -34,8 +34,7 @@ func bootstrapAdmin(store storage.Storage) {
 	}
 	password := os.Getenv("ADMIN_PASSWORD")
 	if password == "" {
-		password = "admin"
-		log.Println("WARNING: no ADMIN_PASSWORD set, using default 'admin' — change it immediately via Settings")
+		log.Fatal("No users exist and ADMIN_PASSWORD is not set. Set ADMIN_PASSWORD (and optionally ADMIN_USERNAME) to create the initial admin, then restart.")
 	}
 	hash, err := auth.HashPassword(password)
 	if err != nil {

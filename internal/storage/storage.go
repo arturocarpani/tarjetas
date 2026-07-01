@@ -180,7 +180,7 @@ func InitializeStorage() (Storage, error) {
 	return nil, fmt.Errorf("invalid data store: %s", baseConfig.StorageType)
 }
 
-var REInvalidChars *regexp.Regexp = regexp.MustCompile(`[^\p{L}\p{N}\s.,\-'_!"]`)
+var REInvalidChars *regexp.Regexp = regexp.MustCompile(`[^\p{L}\p{N}\s.,\-'_!]`)
 var RERepeatingSpaces *regexp.Regexp = regexp.MustCompile(`\s+`)
 
 // allows readable chars like unicode, otherwise replaces with whitespace
@@ -203,6 +203,7 @@ func (e *Expense) Validate() error {
 	if e.Name == "" {
 		return fmt.Errorf("expense 'name' cannot be empty")
 	}
+	e.Category = SanitizeString(e.Category) // sanitize to prevent stored XSS via category
 	if e.Category == "" {
 		return fmt.Errorf("expense 'category' cannot be empty")
 	}
@@ -234,6 +235,7 @@ func (e *RecurringExpense) Validate() error {
 	if e.Name == "" {
 		return fmt.Errorf("recurring expense 'name' cannot be empty")
 	}
+	e.Category = SanitizeString(e.Category) // sanitize to prevent stored XSS via category
 	if e.Category == "" {
 		return fmt.Errorf("recurring expense 'category' cannot be empty")
 	}
