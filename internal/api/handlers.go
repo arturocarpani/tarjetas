@@ -26,6 +26,7 @@ type Handler struct {
 	webhookSecret string
 	tgPending     *tgPendingStore
 	receiptsDir   string // where receipt images are stored (empty = feature off)
+	loginLimiter  *rateLimiter
 }
 
 // SetReceiptsDir enables receipt-image storage in the given directory.
@@ -36,8 +37,9 @@ func (h *Handler) SetReceiptsDir(dir string) {
 // NewHandler creates a new API handler
 func NewHandler(s storage.Storage, sessions *auth.SessionStore) *Handler {
 	return &Handler{
-		storage:  s,
-		sessions: sessions,
+		storage:      s,
+		sessions:     sessions,
+		loginLimiter: newRateLimiter(10, 15*time.Minute), // 10 failed logins / 15 min per IP
 	}
 }
 

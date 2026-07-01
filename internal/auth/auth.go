@@ -23,6 +23,21 @@ func CheckPassword(hash, password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 
+// dummyHash equalizes login timing when a user is not found (hash == ""), so an
+// attacker can't enumerate usernames by measuring response time.
+var dummyHash, _ = bcrypt.GenerateFromPassword([]byte("timing-equalizer"), bcrypt.DefaultCost)
+
+// VerifyPassword always runs a bcrypt comparison — against the real hash, or a
+// dummy one when hash is empty — then returns whether it matched. Use this on
+// the login path instead of short-circuiting on "user not found".
+func VerifyPassword(hash, password string) bool {
+	if hash == "" {
+		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
+		return false
+	}
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+}
+
 // sessionTTL is how long a session cookie stays valid.
 const sessionTTL = 7 * 24 * time.Hour
 
@@ -74,6 +89,18 @@ func (s *SessionStore) Get(token string) (string, bool) {
 func (s *SessionStore) Delete(token string) {
 	s.mu.Lock()
 	delete(s.sessions, token)
+	s.mu.Unlock()
+}
+
+// DeleteByUser removes every session belonging to a user (e.g. on password
+// reset or account deletion) so compromised sessions don't outlive the change.
+func (s *SessionStore) DeleteByUser(userID string) {
+	s.mu.Lock()
+	for token, sess := range s.sessions {
+		if sess.userID == userID {
+			delete(s.sessions, token)
+		}
+	}
 	s.mu.Unlock()
 }
 
