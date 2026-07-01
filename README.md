@@ -238,6 +238,13 @@ Setup:
 Expenses created by the bot are attributed to the linked user, so per-user isolation and the
 admin's consolidated view work the same as in the web app.
 
+### Multi-currency
+
+Each expense can have its own currency (chosen in the web add/edit forms; the Telegram bot
+uses the configured default). Totals are **grouped by currency** wherever they're shown
+(dashboard total, per-card and per-user breakdowns, table total) — e.g. `USD 100 · ARS 50.000`
+— with no conversion, so amounts in different currencies are never summed as if equal.
+
 ### Data Backends
 
 ExpenseOwl supports two data backends - JSON (default), and Postgres. Postgres was added with v4.0 of the app primarily for homelabbers to reuse their Postgres instances as needed for better backup compatibility.

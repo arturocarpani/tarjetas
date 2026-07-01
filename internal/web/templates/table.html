@@ -79,6 +79,11 @@
                 </div>
 
                 <div class="form-group">
+                    <label for="currency">Moneda</label>
+                    <select id="currency"></select>
+                </div>
+
+                <div class="form-group">
                     <label for="tags-input">Etiquetas</label>
                     <div id="tags-input-container" class="tags-input-container">
                         <div id="selected-tags" class="selected-tags"></div>
@@ -229,7 +234,7 @@
         function editExpenseByIndex(index) {
             const expense = expensesForTable[index];
             if (expense) {
-                editExpense(expense.id, expense.name, expense.category, expense.amount, (expense.tags || []), expense.date, expense.card);
+                editExpense(expense.id, expense.name, expense.category, expense.amount, (expense.tags || []), expense.date, expense.card, expense.currency);
             }
         }
 
@@ -270,10 +275,11 @@
             });
         }
 
-        function editExpense(id, name, category, amount, tags, date, card) {
+        function editExpense(id, name, category, amount, tags, date, card, currency) {
             document.getElementById('name').value = name;
             document.getElementById('category').value = category;
             document.getElementById('card').value = card || '';
+            document.getElementById('currency').value = currency || currentCurrency;
             document.getElementById('amount').value = Math.abs(amount);
             renderSelectedTags(tags);
             
@@ -286,7 +292,7 @@
             const form = document.getElementById('expenseForm');
             form.dataset.editId = id;
             const submitButton = form.querySelector('button[type="submit"]');
-            submitButton.textContent = 'Update Expense';
+            submitButton.textContent = 'Actualizar gasto';
             
             form.scrollIntoView({ behavior: 'smooth' });
         }
@@ -377,6 +383,10 @@
                 startDate = config.startDate;
                 availableCards = Array.isArray(config.cards) ? config.cards : [];
                 populateCardControls();
+                const currencySelect = document.getElementById('currency');
+                currencySelect.innerHTML = Object.keys(currencyBehaviors).map(code =>
+                    `<option value="${code}" ${code === currentCurrency ? 'selected' : ''}>${code.toUpperCase()}</option>`
+                ).join('');
                 
                 const response = await fetch('/expenses');
                 if (!response.ok) throw new Error('Failed to fetch data');
@@ -396,7 +406,7 @@
             } catch (error) {
                 console.error('Failed to initialize table:', error);
                 document.getElementById('tableContainer').innerHTML = 
-                    '<div class="no-data">Failed to load expenses</div>';
+                    '<div class="no-data">No se pudieron cargar los gastos</div>';
             }
         }
 
@@ -458,7 +468,7 @@
                 closeDeleteModal();
             } catch (error) {
                 console.error('Error deleting expense:', error);
-                alert('Failed to delete expense. Please try again.');
+                alert('No se pudo borrar el gasto. Probá de nuevo.');
             }
         }
 
@@ -478,6 +488,7 @@
                 name: document.getElementById('name').value,
                 category: document.getElementById('category').value,
                 card: document.getElementById('card').value,
+                currency: document.getElementById('currency').value,
                 amount: amount,
                 date: getISODateWithLocalTime(document.getElementById('date').value),
                 tags: Array.from(selectedTags)
@@ -491,13 +502,13 @@
                 });
                 const messageDiv = document.getElementById('formMessage');
                 if (response.ok) {
-                    messageDiv.textContent = editId ? 'Expense updated successfully!' : 'Expense added successfully!';
+                    messageDiv.textContent = editId ? 'Gasto actualizado.' : 'Gasto agregado.';
                     messageDiv.className = 'form-message success';
                     form.reset();
                     document.getElementById('selected-tags').innerHTML = '';
                     selectedTags.clear();
                     delete form.dataset.editId;
-                    form.querySelector('button[type="submit"]').textContent = 'Add Expense';
+                    form.querySelector('button[type="submit"]').textContent = 'Agregar gasto';
                     await initialize();
                     const today = new Date();
                     const year = today.getFullYear();
@@ -506,7 +517,7 @@
                     document.getElementById('date').value = `${year}-${month}-${day}`;
                 } else {
                     const error = await response.json();
-                    messageDiv.textContent = `Error: ${error.error || 'Failed to save expense'}`;
+                    messageDiv.textContent = `Error: ${error.error || 'No se pudo guardar el gasto'}`;
                     messageDiv.className = 'form-message error';
                 }
                 setTimeout(() => {
@@ -516,7 +527,7 @@
             } catch (error) {
                 console.error('Error saving expense:', error);
                 const messageDiv = document.getElementById('formMessage');
-                messageDiv.textContent = 'Error: Failed to save expense';
+                messageDiv.textContent = 'Error: No se pudo guardar el gasto';
                 messageDiv.className = 'form-message error';
             }
         });

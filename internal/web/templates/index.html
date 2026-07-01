@@ -91,6 +91,11 @@
                     </div>
 
                     <div class="form-group">
+                        <label for="currency">Moneda</label>
+                        <select id="currency"></select>
+                    </div>
+
+                    <div class="form-group">
                         <label for="tags-input">Etiquetas</label>
                         <div id="tags-input-container" class="tags-input-container">
                             <div id="selected-tags" class="selected-tags"></div>
@@ -202,14 +207,16 @@
             // All users' spend for the month (respects the card filter, ignores the
             // per-user filter so it stays an overview).
             const monthExpenses = getMonthExpenses(allExpenses).filter(passesCardFilter);
-            const totals = {};
+            const byUser = {};
             monthExpenses.forEach(exp => {
                 if (exp.amount < 0) {
                     const name = usersById[exp.userID] || '(sin dueño)';
-                    totals[name] = (totals[name] || 0) + Math.abs(exp.amount);
+                    (byUser[name] = byUser[name] || []).push(exp);
                 }
             });
-            const rows = Object.entries(totals).map(([user, total]) => ({ user, total })).sort((a, b) => b.total - a.total);
+            const rows = Object.entries(byUser)
+                .map(([user, exps]) => ({ user, totals: sumByCurrency(exps), sum: exps.reduce((s, e) => s + Math.abs(e.amount), 0) }))
+                .sort((a, b) => b.sum - a.sum);
             if (rows.length === 0) {
                 section.style.display = 'none';
                 list.innerHTML = '';
@@ -220,7 +227,7 @@
                 <div class="legend-item">
                     <div class="legend-text">
                         <span>${escapeHTML(row.user)}</span>
-                        <span class="amount">${formatCurrency(row.total)}</span>
+                        <span class="amount">${fmtByCurrency(row.totals)}</span>
                     </div>
                 </div>
             `).join('');
@@ -318,16 +325,16 @@
         function updateCardBreakdown(expenses) {
             const section = document.getElementById('card-breakdown-section');
             const list = document.getElementById('card-breakdown-list');
-            const cardTotals = {};
+            const byCard = {};
             expenses.forEach(exp => {
                 if (exp.amount < 0) {
                     const cardName = exp.card || '(sin tarjeta)';
-                    cardTotals[cardName] = (cardTotals[cardName] || 0) + Math.abs(exp.amount);
+                    (byCard[cardName] = byCard[cardName] || []).push(exp);
                 }
             });
-            const rows = Object.entries(cardTotals)
-                .map(([card, total]) => ({ card, total }))
-                .sort((a, b) => b.total - a.total);
+            const rows = Object.entries(byCard)
+                .map(([card, exps]) => ({ card, totals: sumByCurrency(exps), sum: exps.reduce((s, e) => s + Math.abs(e.amount), 0) }))
+                .sort((a, b) => b.sum - a.sum);
             if (rows.length === 0) {
                 section.style.display = 'none';
                 list.innerHTML = '';
@@ -337,16 +344,15 @@
             list.innerHTML = rows.map(row => `
                 <div class="legend-item">
                     <div class="legend-text">
-                        <span>${row.card}</span>
-                        <span class="amount">${formatCurrency(row.total)}</span>
+                        <span>${escapeHTML(row.card)}</span>
+                        <span class="amount">${fmtByCurrency(row.totals)}</span>
                     </div>
                 </div>
             `).join('');
         }
 
         function updateCashflow(expenses) {
-            const expenseTotal = calculateExpenses(expenses);
-            document.getElementById('cashflow-expenses').textContent = formatCurrency(expenseTotal);
+            document.getElementById('cashflow-expenses').textContent = fmtByCurrency(sumByCurrency(expenses));
         }
 
         function createPieChart(categoryData) {
@@ -418,16 +424,15 @@
                 legendContainer.appendChild(item);
             });
 
-            const activeTotalExpenses = monthExpenses
-                .filter(exp => exp.amount < 0 && !disabledCategories.has(exp.category))
-                .reduce((sum, exp) => sum + Math.abs(exp.amount), 0);
+            const activeExpenses = monthExpenses
+                .filter(exp => exp.amount < 0 && !disabledCategories.has(exp.category));
 
             const totalsHtml = `
                 <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <span>Total:</span>
                         <span class="amount">
-                            ${formatCurrency(activeTotalExpenses)}
+                            ${fmtByCurrency(sumByCurrency(activeExpenses))}
                         </span>
                     </div>
                 </div>
@@ -457,6 +462,10 @@
                 populateCardControls();
                 currentCurrency = config.currency;
                 startDate = config.startDate;
+                const currencySelect = document.getElementById('currency');
+                currencySelect.innerHTML = Object.keys(currencyBehaviors).map(code =>
+                    `<option value="${code}" ${code === currentCurrency ? 'selected' : ''}>${code.toUpperCase()}</option>`
+                ).join('');
                 
                 const response = await fetch('/expenses');
                 if (!response.ok) throw new Error('Failed to fetch data');
@@ -608,6 +617,7 @@
                 name: document.getElementById('name').value,
                 category: document.getElementById('category').value,
                 card: document.getElementById('card').value,
+                currency: document.getElementById('currency').value,
                 amount: amount,
                 date: getISODateWithLocalTime(document.getElementById('date').value),
                 tags: Array.from(selectedTags)
