@@ -283,6 +283,7 @@ var defaultCategories = []string{
 
 var SupportedCurrencies = []string{
 	"usd", // US Dollar
+	"ars", // Argentine Peso
 	"eur", // Euro
 	"gbp", // British Pound
 	"jpy", // Japanese Yen

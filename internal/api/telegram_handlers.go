@@ -109,6 +109,12 @@ func (h *Handler) processUpdate(update telegram.Update) {
 	}
 	fileID := msg.LargestPhotoID()
 
+	// Slash commands take precedence (before edit-capture and expense parsing).
+	if fileID == "" && strings.HasPrefix(strings.TrimSpace(text), "/") {
+		h.handleCommand(chatID, user, strings.TrimSpace(text))
+		return
+	}
+
 	// If we're waiting for a free-text edit (concept/date) and this is a plain
 	// text message, treat it as the edit value rather than a new expense.
 	if fileID == "" && strings.TrimSpace(text) != "" {
@@ -347,6 +353,33 @@ func (h *Handler) saveConfirmed(chatID int64, msgID int, p *pendingExpense) {
 	}
 	if err := h.telegram.EditMessageText(chatID, msgID, formatConfirmation(p.exp), postSaveKeyboard(p.exp.ID)); err != nil {
 		log.Printf("TELEGRAM ERROR: edit confirm: %v\n", err)
+	}
+}
+
+const botHelpText = `🤖 Bot de gastos
+
+Cargá un gasto de dos formas:
+• Escribí el gasto en texto: "Almuerzo 4500 en restaurante"
+• Mandá una foto del ticket y lo leo con IA
+
+Después te muestro lo que entendí y podés:
+• 💳 Elegir tarjeta y 🏷️ categoría con botones
+• ✏️ Editar el concepto y 📅 la fecha
+• ✅ Guardar o ❌ Cancelar
+
+Y sobre un gasto ya guardado: 🗑️ Borrar o ✏️ Editar.
+
+Comandos:
+/ayuda — esta ayuda`
+
+func (h *Handler) handleCommand(chatID int64, user storage.User, text string) {
+	fields := strings.Fields(text)
+	cmd := strings.ToLower(fields[0])
+	switch cmd {
+	case "/start", "/help", "/ayuda":
+		h.reply(chatID, botHelpText)
+	default:
+		h.reply(chatID, "Comando no reconocido.\n\n"+botHelpText)
 	}
 }
 

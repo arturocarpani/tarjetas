@@ -37,16 +37,16 @@
                 <a href="/">
                     <img src="/pwa/icon-192.png" alt="ExpenseOwl Logo" height="85" style="vertical-align: middle; margin-right: 20px;">
                 </a>
-                <a href="/" class="view-button active" data-tooltip="Dashboard">
+                <a href="/" class="view-button active" data-tooltip="Panel">
                     <i class="fa-solid fa-chart-pie"></i>
                 </a>
-                <a href="/table" class="view-button" data-tooltip="Table View">
+                <a href="/table" class="view-button" data-tooltip="Tabla">
                     <i class="fa-solid fa-table"></i>
                 </a>
-                <a href="/settings" class="view-button" data-tooltip="Settings">
+                <a href="/settings" class="view-button" data-tooltip="Ajustes">
                     <i class="fa-solid fa-gear"></i>
                 </a>
-                <a href="/logout" class="view-button" data-tooltip="Logout">
+                <a href="/logout" class="view-button" data-tooltip="Salir">
                     <i class="fa-solid fa-right-from-bracket"></i>
                 </a>
             </div>
@@ -69,14 +69,14 @@
             <div class="form-container">
                 <form id="expenseForm" class="expense-form">
                     <div class="form-group">
-                        <label for="name">Name</label>
+                        <label for="name">Nombre</label>
                         <input type="text" id="name" value="-" required>
                     </div>
                     
                     <div class="form-group">
-                        <label for="category">Category</label>
+                        <label for="category">Categoría</label>
                         <select id="category" required>
-                            <option value="">categories</option>
+                            <option value="">Categorías</option>
                         </select>
                     </div>
 
@@ -88,21 +88,21 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="tags-input">Tags</label>
+                        <label for="tags-input">Etiquetas</label>
                         <div id="tags-input-container" class="tags-input-container">
                             <div id="selected-tags" class="selected-tags"></div>
-                            <input type="text" id="tags-input" placeholder="(optional)">
+                            <input type="text" id="tags-input" placeholder="(opcional)">
                         </div>
                         <div id="tags-dropdown" class="tags-dropdown"></div>
                     </div>
                     
                     <div class="form-group">
-                        <label for="amount">Amount</label>
+                        <label for="amount">Monto</label>
                         <input type="number" id="amount" step="0.01" min="0.01" max="9000000000000000" required>
                     </div>
                     
                     <div class="form-group">
-                        <label for="date">Date</label>
+                        <label for="date">Fecha</label>
                         <input type="date" id="date" required>
                         <script>
                             const today = new Date();
@@ -114,14 +114,14 @@
                         </script>
                     </div>
                     
-                    <button type="submit" class="nav-button">Add Expense</button>
+                    <button type="submit" class="nav-button">Agregar gasto</button>
                 </form>
                 <div id="formMessage" class="form-message"></div>
             </div>
         </div>
 
         <div class="chart-container">
-            <div id="noDataMessage" class="no-data" style="display: none; width: 100%;">No expenses recorded this month.</div>
+            <div id="noDataMessage" class="no-data" style="display: none; width: 100%;">No hay gastos registrados este mes.</div>
             <div class="chart-box">
                 <canvas id="categoryPieChart"></canvas>
             </div>
@@ -553,7 +553,7 @@
                     document.getElementById('date').value = `${year}-${month}-${day}`;
                 } else {
                     const error = await response.json();
-                    messageDiv.textContent = `Error: ${error.error || 'Failed to add expense'}`;
+                    messageDiv.textContent = `Error: ${error.error || 'No se pudo agregar el gasto'}`;
                     messageDiv.className = 'form-message error';
                 }
                 setTimeout(() => {
@@ -563,7 +563,7 @@
             } catch (error) {
                 console.error('Error adding expense:', error);
                 const messageDiv = document.getElementById('formMessage');
-                messageDiv.textContent = 'Error: Failed to add expense';
+                messageDiv.textContent = 'Error: No se pudo agregar el gasto';
                 messageDiv.className = 'form-message error';
             }
         });
