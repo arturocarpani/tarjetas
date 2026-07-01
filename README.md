@@ -199,6 +199,8 @@ bot then shows an **interactive confirmation** with inline buttons — pick the 
 category, edit the concept or date, and confirm — before saving through the same path as
 the web UI. When you send a photo, the **receipt image is kept as backup** and is viewable
 from the table view (a receipt icon on each expense that has one; owner or admin only).
+After saving, the confirmation message keeps **🗑️ Delete** and **✏️ Edit** buttons so the
+user can remove or re-edit that expense straight from Telegram.
 
 The bot is enabled only when `TELEGRAM_BOT_TOKEN`, `ANTHROPIC_API_KEY`, **and**
 `TELEGRAM_WEBHOOK_SECRET` are all set; otherwise the app logs `Telegram bot disabled` and
