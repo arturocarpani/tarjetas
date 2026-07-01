@@ -138,7 +138,11 @@
                 <h2 align="center">Importar / Exportar datos</h2>
                 <div class="export-buttons">
                     <div class="export-options">
-                        <a href="/export/csv" id="csv-export-file" class="nav-button" download="expenses.csv">Exportar a CSV</a>
+                        <label for="exportFrom" style="font-size:0.85rem;">Desde</label>
+                        <input type="date" id="exportFrom">
+                        <label for="exportTo" style="font-size:0.85rem;">Hasta</label>
+                        <input type="date" id="exportTo">
+                        <button id="exportCsvBtn" class="nav-button">Exportar a CSV</button>
                     </div>
                     <div class="import-option">
                         <label for="csv-import-file" class="nav-button">Importar CSV</label>
@@ -1040,6 +1044,15 @@
         document.getElementById('saveStartDate').addEventListener('click', saveStartDate);
         document.getElementById('csv-import-file').addEventListener('change', handleCsvImport);
         document.getElementById('csv-import-file-old').addEventListener('change', handleCsvImportOld);
+        document.getElementById('exportCsvBtn').addEventListener('click', () => {
+            const params = new URLSearchParams();
+            const from = document.getElementById('exportFrom').value;
+            const to = document.getElementById('exportTo').value;
+            if (from) params.set('from', from);
+            if (to) params.set('to', to);
+            const qs = params.toString();
+            window.location.href = '/export/csv' + (qs ? '?' + qs : '');
+        });
         document.getElementById('newCategory').addEventListener('keypress', e => e.key === 'Enter' && addCategory());
         document.getElementById('newCard').addEventListener('keypress', e => e.key === 'Enter' && addCard());
 
