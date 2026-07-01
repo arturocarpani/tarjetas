@@ -24,16 +24,16 @@
                 <a href="/">
                     <img src="/pwa/icon-192.png" alt="ExpenseOwl Logo" height="85" style="vertical-align: middle; margin-right: 20px;">
                 </a>
-                <a href="/" class="view-button" data-tooltip="Dashboard">
+                <a href="/" class="view-button" data-tooltip="Panel">
                     <i class="fa-solid fa-chart-pie"></i>
                 </a>
-                <a href="/table" class="view-button" data-tooltip="Table View">
+                <a href="/table" class="view-button" data-tooltip="Tabla">
                     <i class="fa-solid fa-table"></i>
                 </a>
-                <a href="/settings" class="view-button active" data-tooltip="Settings">
+                <a href="/settings" class="view-button active" data-tooltip="Ajustes">
                     <i class="fa-solid fa-gear"></i>
                 </a>
-                <a href="/logout" class="view-button" data-tooltip="Logout">
+                <a href="/logout" class="view-button" data-tooltip="Salir">
                     <i class="fa-solid fa-right-from-bracket"></i>
                 </a>
             </div>
@@ -48,15 +48,15 @@
         </div>
 
         <div class="form-container">
-            <h2 align="center">Category Settings</h2>
+            <h2 align="center">Categorías</h2>
             <div id="categories-manager">
                 <div id="categories-list" class="categories-list">
                 </div>
                 <div class="category-input-container">
-                    <input type="text" id="newCategory" placeholder="Add new category">
+                    <input type="text" id="newCategory" placeholder="Agregar categoría">
                     <button id="addCategory" class="nav-button">Add</button>
                 </div>
-                <button id="saveCategories" class="nav-button">Save Categories</button>
+                <button id="saveCategories" class="nav-button">Guardar categorías</button>
                 <div id="categoriesMessage" class="form-message"></div>
             </div>
         </div>
@@ -67,10 +67,10 @@
                 <div id="cards-list" class="categories-list">
                 </div>
                 <div class="category-input-container">
-                    <input type="text" id="newCard" placeholder="Add new card">
+                    <input type="text" id="newCard" placeholder="Agregar tarjeta">
                     <button id="addCard" class="nav-button">Add</button>
                 </div>
-                <button id="saveCards" class="nav-button">Save Cards</button>
+                <button id="saveCards" class="nav-button">Guardar tarjetas</button>
                 <div id="cardsMessage" class="form-message"></div>
             </div>
         </div>
@@ -103,20 +103,20 @@
 
         <div class="settings-container">
             <div class="form-container half-width">
-                <h2 align="center">Currency Settings</h2>
+                <h2 align="center">Moneda</h2>
                 <div class="currency-selector">
                     <select id="currencySelect">
                     </select>
-                    <button id="saveCurrency" class="nav-button">Save</button>
+                    <button id="saveCurrency" class="nav-button">Guardar</button>
                 </div>
                 <div id="currencyMessage" class="form-message"></div>
             </div>
             
             <div class="form-container half-width">
-                <h2 align="center">Start Date Settings</h2>
+                <h2 align="center">Día de inicio</h2>
                 <div class="start-date-manager">
                     <input type="number" id="startDate" min="1" max="31" placeholder="1">
-                    <button id="saveStartDate" class="nav-button">Save</button>
+                    <button id="saveStartDate" class="nav-button">Guardar</button>
                 </div>
                 <div id="startDateMessage" class="form-message"></div>
             </div>
@@ -124,7 +124,7 @@
 
         <div class="settings-container">
             <div class="form-container half-width">
-                <h2 align="center">Theme Settings</h2>
+                <h2 align="center">Tema</h2>
                 <div class="theme-selector">
                     <select id="themeSelect">
                         <option value="system">System Default</option>
@@ -135,44 +135,44 @@
                 <div id="themeMessage" class="form-message"></div>
             </div>
             <div class="form-container half-width">
-                <h2 align="center">Import/Export Data</h2>
+                <h2 align="center">Importar / Exportar datos</h2>
                 <div class="export-buttons">
                     <div class="export-options">
-                        <a href="/export/csv" id="csv-export-file" class="nav-button" download="expenses.csv">Export to CSV</a>
+                        <a href="/export/csv" id="csv-export-file" class="nav-button" download="expenses.csv">Exportar a CSV</a>
                     </div>
                     <div class="import-option">
-                        <label for="csv-import-file" class="nav-button">Import from CSV</label>
+                        <label for="csv-import-file" class="nav-button">Importar CSV</label>
                         <input type="file" id="csv-import-file" accept=".csv" style="display: none;">
                     </div>
                     <div class="import-option">
-                        <label for="csv-import-file-old" class="nav-button">Import from ExpenseOwl v3.20-</label>
+                        <label for="csv-import-file-old" class="nav-button">Importar de ExpenseOwl v3.20-</label>
                         <input type="file" id="csv-import-file-old" accept=".csv" style="display: none;">
                     </div>
                 </div>
                 <div id="importMessage" class="form-message"></div>
                 <div id="importSummary" class="import-summary" style="display: none;">
-                    <h3>Import Summary</h3>
-                    <p>Total Processed: <span id="summary-processed"></span></p>
-                    <p>Imported: <span id="summary-imported"></span></p>
-                    <p>Skipped: <span id="summary-skipped"></span></p>
-                    <p>New Categories: <span id="summary-new-categories"></span></p>
+                    <h3>Resumen de importación</h3>
+                    <p>Procesados: <span id="summary-processed"></span></p>
+                    <p>Importados: <span id="summary-imported"></span></p>
+                    <p>Omitidos: <span id="summary-skipped"></span></p>
+                    <p>Categorías nuevas: <span id="summary-new-categories"></span></p>
                 </div>
             </div>
         </div>
         
         <div class="form-container">
-            <h2 align="center">Recurring Transactions</h2>
+            <h2 align="center">Gastos recurrentes</h2>
             <form id="recurringExpenseForm" class="expense-form recurring-expense-form">
                 <div class="form-group">
-                    <label for="recurringName">Name</label>
+                    <label for="recurringName">Nombre</label>
                     <input type="text" id="recurringName" required>
                 </div>
                 <div class="form-group">
-                    <label for="recurringAmount">Amount</label>
+                    <label for="recurringAmount">Monto</label>
                     <input type="number" id="recurringAmount" step="0.01" min="0.01" max="9000000000000000" required>
                 </div>
                 <div class="form-group">
-                    <label for="recurringCategory">Category</label>
+                    <label for="recurringCategory">Categoría</label>
                     <select id="recurringCategory" required></select>
                 </div>
                 <div class="form-group">
@@ -180,24 +180,24 @@
                     <select id="recurringCard"></select>
                 </div>
                 <div class="form-group">
-                    <label for="tags-input">Tags</label>
+                    <label for="tags-input">Etiquetas</label>
                     <div class="tags-input-container">
                         <div id="selected-tags" class="selected-tags"></div>
-                        <input type="text" id="tags-input" placeholder="(optional)">
+                        <input type="text" id="tags-input" placeholder="(opcional)">
                     </div>
                     <div id="tags-dropdown" class="tags-dropdown"></div>
                 </div>
                 <div class="form-group">
-                    <label for="recurringInterval">Interval</label>
+                    <label for="recurringInterval">Intervalo</label>
                     <select id="recurringInterval" required>
-                        <option value="daily">Daily</option>
-                        <option value="weekly">Weekly</option>
-                        <option value="monthly">Monthly</option>
-                        <option value="yearly">Yearly</option>
+                        <option value="daily">Diario</option>
+                        <option value="weekly">Semanal</option>
+                        <option value="monthly">Mensual</option>
+                        <option value="yearly">Anual</option>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label for="recurringStartDate">Start Date</label>
+                    <label for="recurringStartDate">Fecha de inicio</label>
                     <input type="date" id="recurringStartDate" required>
                     <script>
                         const today = new Date();
@@ -209,7 +209,7 @@
                     </script>
                 </div>
                 <div class="form-group">
-                    <label for="recurringOccurrences">Occurrences</label>
+                    <label for="recurringOccurrences">Ocurrencias</label>
                     <input type="number" id="recurringOccurrences" min="2" value="2" required>
                 </div>
                 <button type="submit" class="nav-button">Add Recurring Transaction</button>
@@ -223,30 +223,30 @@
 
     <div id="deleteRecurringModal" class="modal">
         <div class="modal-content">
-            <h3>Delete Recurring Expense</h3>
+            <h3>Borrar gasto recurrente</h3>
             <p>Do you want to delete all instances of this expense, or only future ones?</p>
             <div class="modal-buttons">
-                <button class="modal-button" onclick="closeRecurringDeleteModal()">Cancel</button>
-                <button class="modal-button" onclick="confirmRecurringDelete(false)">Delete Future</button>
-                <button class="modal-button confirm" onclick="confirmRecurringDelete(true)">Delete All</button>
+                <button class="modal-button" onclick="closeRecurringDeleteModal()">Cancelar</button>
+                <button class="modal-button" onclick="confirmRecurringDelete(false)">Borrar futuros</button>
+                <button class="modal-button confirm" onclick="confirmRecurringDelete(true)">Borrar todos</button>
             </div>
         </div>
     </div>
 
     <div id="editRecurringModal" class="modal">
         <div class="modal-content">
-            <h3>Edit Recurring Expense</h3>
+            <h3>Editar gasto recurrente</h3>
             <form id="editRecurringExpenseForm" class="expense-form recurring-expense-form">
                  <div class="form-group">
-                    <label for="editRecurringName">Name</label>
+                    <label for="editRecurringName">Nombre</label>
                     <input type="text" id="editRecurringName" required>
                 </div>
                 <div class="form-group">
-                    <label for="editRecurringAmount">Amount</label>
+                    <label for="editRecurringAmount">Monto</label>
                     <input type="number" id="editRecurringAmount" step="0.01" min="0" required>
                 </div>
                 <div class="form-group">
-                    <label for="editRecurringCategory">Category</label>
+                    <label for="editRecurringCategory">Categoría</label>
                     <select id="editRecurringCategory" required></select>
                 </div>
                 <div class="form-group">
@@ -254,33 +254,33 @@
                     <select id="editRecurringCard"></select>
                 </div>
                 <div class="form-group">
-                    <label for="edit-tags-input">Tags</label>
+                    <label for="edit-tags-input">Etiquetas</label>
                     <div class="tags-input-container">
                         <div id="edit-selected-tags" class="selected-tags"></div>
-                        <input type="text" id="edit-tags-input" placeholder="(optional)">
+                        <input type="text" id="edit-tags-input" placeholder="(opcional)">
                     </div>
                     <div id="edit-tags-dropdown" class="tags-dropdown"></div>
                 </div>
                 <div class="form-group">
-                    <label for="editRecurringInterval">Interval</label>
+                    <label for="editRecurringInterval">Intervalo</label>
                     <select id="editRecurringInterval" required>
-                        <option value="daily">Daily</option>
-                        <option value="weekly">Weekly</option>
-                        <option value="monthly">Monthly</option>
-                        <option value="yearly">Yearly</option>
+                        <option value="daily">Diario</option>
+                        <option value="weekly">Semanal</option>
+                        <option value="monthly">Mensual</option>
+                        <option value="yearly">Anual</option>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label for="editRecurringStartDate">Start Date</label>
+                    <label for="editRecurringStartDate">Fecha de inicio</label>
                     <input type="date" id="editRecurringStartDate" required>
                 </div>
                 <div class="form-group">
-                    <label for="editRecurringOccurrences">Occurrences (0 for indefinite)</label>
+                    <label for="editRecurringOccurrences">Ocurrencias (0 = indefinido)</label>
                     <input type="number" id="editRecurringOccurrences" min="0" value="0" required>
                 </div>
             </form>
             <div class="modal-buttons">
-                <button class="modal-button" onclick="closeRecurringEditModal()">Cancel</button>
+                <button class="modal-button" onclick="closeRecurringEditModal()">Cancelar</button>
                 <button class="modal-button" onclick="confirmRecurringUpdate(false)">Update Future</button>
                 <button class="modal-button confirm" onclick="confirmRecurringUpdate(true)">Update All</button>
             </div>
@@ -428,7 +428,7 @@
                     showMessage('categoriesMessage', 'Categories saved successfully', true);
                 } else {
                     const error = await response.json();
-                    showMessage('categoriesMessage', `Failed to save categories: ${error.error}`, false);
+                    showMessage('categoriesMessage', `No se pudieron guardar las categorías: ${error.error}`, false);
                 }
             } catch (error) {
                 console.error('Error saving categories:', error);
@@ -494,7 +494,7 @@
                     populateCardSelects();
                 } else {
                     const error = await response.json();
-                    showMessage('cardsMessage', `Failed to save cards: ${error.error}`, false);
+                    showMessage('cardsMessage', `No se pudieron guardar las tarjetas: ${error.error}`, false);
                 }
             } catch (error) {
                 console.error('Error saving cards:', error);
@@ -612,7 +612,7 @@
                     showMessage('currencyMessage', 'Currency saved successfully', true);
                     currentCurrency = currencyCode;
                 } else {
-                    showMessage('currencyMessage', 'Failed to save currency', false);
+                    showMessage('currencyMessage', 'No se pudo guardar la moneda', false);
                 }
             } catch (error) {
                 console.error('Error saving currency:', error);
@@ -632,7 +632,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(parseInt(startDateValue, 10))
                 });
-                showMessage('startDateMessage', response.ok ? 'Start date saved successfully' : 'Failed to save start date', response.ok);
+                showMessage('startDateMessage', response.ok ? 'Día de inicio guardado' : 'No se pudo guardar el día de inicio', response.ok);
             } catch (error) {
                 console.error('Error saving start date:', error);
                 showMessage('startDateMessage', 'Error saving start date', false);
@@ -642,12 +642,12 @@
         async function fetchAndRenderRecurringExpenses() {
             try {
                 const response = await fetch('/recurring-expenses');
-                if (!response.ok) throw new Error('Failed to fetch recurring expenses');
+                if (!response.ok) throw new Error('No se pudieron cargar los gastos recurrentes');
                 recurringExpenses = await response.json() || [];
                 renderRecurringExpenses(recurringExpenses);
             } catch (error) {
                 console.error('Error fetching recurring expenses:', error);
-                document.getElementById('recurring-expenses-list').innerHTML = '<p>Error loading recurring expenses.</p>';
+                document.getElementById('recurring-expenses-list').innerHTML = '<p>Error al cargar los gastos recurrentes.</p>';
             }
         }
 
@@ -684,12 +684,12 @@
         function renderRecurringExpenses(recurring) {
             const list = document.getElementById('recurring-expenses-list');
             if (!recurring || recurring.length === 0) {
-                list.innerHTML = '<p>No recurring expenses found.</p>';
+                list.innerHTML = '<p>No hay gastos recurrentes.</p>';
                 return;
             }
             list.innerHTML = `
                 <table class="expense-table">
-                    <thead><tr><th>Name</th><th>Amount</th><th>Category</th><th>Interval</th><th>Next Occurrence</th><th></th></tr></thead>
+                    <thead><tr><th>Nombre</th><th>Monto</th><th>Categoría</th><th>Intervalo</th><th>Próxima</th><th></th></tr></thead>
                     <tbody>
                         ${recurring.map(r => `
                             <tr>
@@ -722,12 +722,12 @@
             if (!recurringExpenseToDelete) return;
             try {
                 const response = await fetch(`/recurring-expense/delete?id=${recurringExpenseToDelete}&removeAll=${removeAll}`, { method: 'DELETE' });
-                if (!response.ok) throw new Error('Failed to delete recurring expense');
+                if (!response.ok) throw new Error('No se pudo borrar el gasto recurrente');
                 showMessage('recurringExpenseMessage', 'Recurring expense deleted successfully', true);
                 fetchAndRenderRecurringExpenses();
             } catch (error) {
                 console.error('Error deleting recurring expense:', error);
-                showMessage('recurringExpenseMessage', 'Failed to delete recurring expense', false);
+                showMessage('recurringExpenseMessage', 'No se pudo borrar el gasto recurrente', false);
             } finally {
                 closeRecurringDeleteModal();
             }
@@ -775,12 +775,12 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(updatedData)
                 });
-                if (!response.ok) throw new Error('Failed to update recurring expense');
+                if (!response.ok) throw new Error('No se pudo actualizar el gasto recurrente');
                 showMessage('recurringExpenseMessage', 'Recurring expense updated successfully', true);
                 fetchAndRenderRecurringExpenses();
             } catch(error) {
                 console.error('Error updating recurring expense:', error);
-                showMessage('recurringExpenseMessage', 'Failed to update recurring expense', false);
+                showMessage('recurringExpenseMessage', 'No se pudo actualizar el gasto recurrente', false);
             } finally {
                 closeRecurringEditModal();
             }
@@ -818,7 +818,7 @@
                     
                     await initialize();
                 } else {
-                    messageDiv.textContent = `Error: ${result.error || 'Failed to import CSV'}`;
+                    messageDiv.textContent = `Error: ${result.error || 'No se pudo importar el CSV'}`;
                     messageDiv.className = 'form-message error';
                 }
             } catch (error) {
@@ -862,7 +862,7 @@
                     
                     await initialize();
                 } else {
-                    messageDiv.textContent = `Error: ${result.error || 'Failed to import CSV'}`;
+                    messageDiv.textContent = `Error: ${result.error || 'No se pudo importar el CSV'}`;
                     messageDiv.className = 'form-message error';
                 }
             } catch (error) {
@@ -886,7 +886,7 @@
                 const config = await configResponse.json();
                 if (!expensesResponse.ok) throw new Error('Failed to fetch expenses');
                 const expenses = await expensesResponse.json();
-                if (!recurringExpensesResponse.ok) throw new Error('Failed to fetch recurring expenses');
+                if (!recurringExpensesResponse.ok) throw new Error('No se pudieron cargar los gastos recurrentes');
                 recurringExpenses = await recurringExpensesResponse.json() || [];
 
                 categories = [...config.categories];
@@ -915,7 +915,7 @@
 
             } catch (error) {
                 console.error('Failed to initialize settings:', error);
-                showMessage('categoriesMessage', 'Failed to load settings', false);
+                showMessage('categoriesMessage', 'No se pudo cargar la configuración', false);
             }
         }
 
@@ -1099,11 +1099,11 @@
                     fetchAndRenderRecurringExpenses();
                 } else {
                     const error = await response.json();
-                    showMessage('recurringExpenseMessage', `Error: ${error.error || 'Failed to add recurring expense'}`, false);
+                    showMessage('recurringExpenseMessage', `Error: ${error.error || 'No se pudo agregar el gasto recurrente'}`, false);
                 }
             } catch (error) {
                 console.error('Error adding recurring expense:', error);
-                showMessage('recurringExpenseMessage', 'Error: Failed to add recurring expense', false);
+                showMessage('recurringExpenseMessage', 'Error: No se pudo agregar el gasto recurrente', false);
             }
         });
 

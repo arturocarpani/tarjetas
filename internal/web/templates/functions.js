@@ -5,6 +5,7 @@ const colorPalette = [
 ];
 const currencyBehaviors = {
     usd: {symbol: "$", useComma: false, useDecimals: true, useSpace: false, right: false},
+    ars: {symbol: "$", useComma: true, useDecimals: true, useSpace: false, right: false},
     eur: {symbol: "€", useComma: true, useDecimals: true, useSpace: false, right: false},
     gbp: {symbol: "£", useComma: false, useDecimals: true, useSpace: false, right: false},
     jpy: {symbol: "¥", useComma: false, useDecimals: false, useSpace: false, right: false},
@@ -62,7 +63,7 @@ function getUserTimeZone() {
 }
 
 function formatMonth(date) {
-    return date.toLocaleDateString('en-US', {
+    return date.toLocaleDateString('es-AR', {
         year: 'numeric',
         month: 'long',
         timeZone: getUserTimeZone()
@@ -81,13 +82,11 @@ function getISODateWithLocalTime(dateInput) {
 
 function formatDateFromUTC(utcDateString) {
     const date = new Date(utcDateString);
-    return date.toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
+    return date.toLocaleDateString('es-AR', {
+        day: '2-digit',
+        month: '2-digit',
         year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZoneName: 'short'
+        timeZone: getUserTimeZone()
     });
 }
 

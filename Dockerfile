@@ -12,6 +12,10 @@ FROM alpine:latest
 
 WORKDIR /app
 
+# Root CA bundle for outbound HTTPS (Telegram + Anthropic APIs) and tzdata so
+# timestamps aren't stuck in UTC.
+RUN apk add --no-cache ca-certificates tzdata
+
 # Create data directory if not exists
 RUN mkdir -p /app/data
 
