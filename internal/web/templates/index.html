@@ -143,6 +143,11 @@
             <h3>Gasto por tarjeta</h3>
             <div id="card-breakdown-list"></div>
         </div>
+
+        <div id="user-breakdown-section" class="legend-box" style="display: none;">
+            <h3>Gasto por usuario</h3>
+            <div id="user-breakdown-list"></div>
+        </div>
     </div>
 
     <script src="/functions.js"></script>
@@ -159,6 +164,8 @@
         let loadedCards = [];
         let currentCardFilter = "";
         let currentUserFilter = "";
+        let isAdminUser = false;
+        let usersById = {};
 
         // Admin-only user filter: fetch /me, and if admin, populate a user dropdown
         // so the admin can slice the dashboard by employee.
@@ -168,17 +175,55 @@
                 if (!meRes.ok) return;
                 const me = await meRes.json();
                 if (!me.isAdmin) return;
+                isAdminUser = true;
                 const usersRes = await fetch('/users');
                 if (!usersRes.ok) return;
                 const users = await usersRes.json();
+                usersById = {};
+                (users || []).forEach(u => { usersById[u.id] = u.username; });
                 const sel = document.getElementById('userFilter');
                 sel.innerHTML = '<option value="">Todos los usuarios</option>' +
                     (users || []).map(u => `<option value="${escapeHTML(u.id)}">${escapeHTML(u.username)}</option>`).join('');
                 sel.value = currentUserFilter;
                 sel.style.display = '';
+                updateChartAndLegend(); // refresh so the per-user breakdown renders
             } catch (e) {
                 console.error('setupAdminUserFilter:', e);
             }
+        }
+
+        function updateUserBreakdown() {
+            const section = document.getElementById('user-breakdown-section');
+            const list = document.getElementById('user-breakdown-list');
+            if (!isAdminUser) {
+                section.style.display = 'none';
+                return;
+            }
+            // All users' spend for the month (respects the card filter, ignores the
+            // per-user filter so it stays an overview).
+            const monthExpenses = getMonthExpenses(allExpenses).filter(passesCardFilter);
+            const totals = {};
+            monthExpenses.forEach(exp => {
+                if (exp.amount < 0) {
+                    const name = usersById[exp.userID] || '(sin dueño)';
+                    totals[name] = (totals[name] || 0) + Math.abs(exp.amount);
+                }
+            });
+            const rows = Object.entries(totals).map(([user, total]) => ({ user, total })).sort((a, b) => b.total - a.total);
+            if (rows.length === 0) {
+                section.style.display = 'none';
+                list.innerHTML = '';
+                return;
+            }
+            section.style.display = 'flex';
+            list.innerHTML = rows.map(row => `
+                <div class="legend-item">
+                    <div class="legend-text">
+                        <span>${escapeHTML(row.user)}</span>
+                        <span class="amount">${formatCurrency(row.total)}</span>
+                    </div>
+                </div>
+            `).join('');
         }
 
         function passesUserFilter(exp) {
@@ -267,6 +312,7 @@
                 updateLegend(categoryData);
             }
             updateCardBreakdown(allMonthExpenses);
+            updateUserBreakdown();
         }
 
         function updateCardBreakdown(expenses) {
