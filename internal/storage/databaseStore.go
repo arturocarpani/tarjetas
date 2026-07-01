@@ -30,7 +30,8 @@ const (
 		currency VARCHAR(3) NOT NULL,
 		date TIMESTAMPTZ NOT NULL,
 		tags TEXT,
-		card TEXT
+		card TEXT,
+		receipt_path TEXT
 	);`
 
 	createRecurringExpensesTableSQL = `
@@ -75,7 +76,8 @@ const (
 	ALTER TABLE config ADD COLUMN IF NOT EXISTS cards TEXT;
 	ALTER TABLE expenses ADD COLUMN IF NOT EXISTS user_id TEXT;
 	ALTER TABLE recurring_expenses ADD COLUMN IF NOT EXISTS user_id TEXT;
-	ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_id TEXT;`
+	ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_id TEXT;
+	ALTER TABLE expenses ADD COLUMN IF NOT EXISTS receipt_path TEXT;`
 )
 
 func InitializePostgresStore(baseConfig SystemConfig) (Storage, error) {
@@ -399,7 +401,8 @@ func scanExpense(scanner interface{ Scan(...any) error }) (Expense, error) {
 	var recurringID sql.NullString
 	var card sql.NullString
 	var userID sql.NullString
-	err := scanner.Scan(&expense.ID, &recurringID, &expense.Name, &expense.Category, &expense.Amount, &expense.Currency, &expense.Date, &tagsStr, &card, &userID)
+	var receiptPath sql.NullString
+	err := scanner.Scan(&expense.ID, &recurringID, &expense.Name, &expense.Category, &expense.Amount, &expense.Currency, &expense.Date, &tagsStr, &card, &userID, &receiptPath)
 	if err != nil {
 		return Expense{}, err
 	}
@@ -412,6 +415,9 @@ func scanExpense(scanner interface{ Scan(...any) error }) (Expense, error) {
 	if userID.Valid {
 		expense.UserID = userID.String
 	}
+	if receiptPath.Valid {
+		expense.ReceiptPath = receiptPath.String
+	}
 	if tagsStr.Valid && tagsStr.String != "" {
 		if err := json.Unmarshal([]byte(tagsStr.String), &expense.Tags); err != nil {
 			return Expense{}, fmt.Errorf("failed to parse tags for expense %s: %v", expense.ID, err)
@@ -421,7 +427,7 @@ func scanExpense(scanner interface{ Scan(...any) error }) (Expense, error) {
 }
 
 func (s *databaseStore) GetAllExpenses() ([]Expense, error) {
-	query := `SELECT id, recurring_id, name, category, amount, currency, date, tags, card, user_id FROM expenses ORDER BY date DESC`
+	query := `SELECT id, recurring_id, name, category, amount, currency, date, tags, card, user_id, receipt_path FROM expenses ORDER BY date DESC`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query expenses: %v", err)
@@ -440,7 +446,7 @@ func (s *databaseStore) GetAllExpenses() ([]Expense, error) {
 }
 
 func (s *databaseStore) GetExpense(id string) (Expense, error) {
-	query := `SELECT id, recurring_id, name, category, amount, currency, date, tags, card, user_id FROM expenses WHERE id = $1`
+	query := `SELECT id, recurring_id, name, category, amount, currency, date, tags, card, user_id, receipt_path FROM expenses WHERE id = $1`
 	expense, err := scanExpense(s.db.QueryRow(query, id))
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -466,10 +472,10 @@ func (s *databaseStore) AddExpense(expense Expense) error {
 		return err
 	}
 	query := `
-		INSERT INTO expenses (id, recurring_id, name, category, amount, currency, date, tags, card, user_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO expenses (id, recurring_id, name, category, amount, currency, date, tags, card, user_id, receipt_path)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`
-	_, err = s.db.Exec(query, expense.ID, expense.RecurringID, expense.Name, expense.Category, expense.Amount, expense.Currency, expense.Date, string(tagsJSON), expense.Card, expense.UserID)
+	_, err = s.db.Exec(query, expense.ID, expense.RecurringID, expense.Name, expense.Category, expense.Amount, expense.Currency, expense.Date, string(tagsJSON), expense.Card, expense.UserID, expense.ReceiptPath)
 	return err
 }
 
@@ -484,10 +490,10 @@ func (s *databaseStore) UpdateExpense(id string, expense Expense) error {
 	}
 	query := `
 		UPDATE expenses
-		SET name = $1, category = $2, amount = $3, currency = $4, date = $5, tags = $6, recurring_id = $7, card = $8, user_id = $9
-		WHERE id = $10
+		SET name = $1, category = $2, amount = $3, currency = $4, date = $5, tags = $6, recurring_id = $7, card = $8, user_id = $9, receipt_path = $10
+		WHERE id = $11
 	`
-	result, err := s.db.Exec(query, expense.Name, expense.Category, expense.Amount, expense.Currency, expense.Date, string(tagsJSON), expense.RecurringID, expense.Card, expense.UserID, id)
+	result, err := s.db.Exec(query, expense.Name, expense.Category, expense.Amount, expense.Currency, expense.Date, string(tagsJSON), expense.RecurringID, expense.Card, expense.UserID, expense.ReceiptPath, id)
 	if err != nil {
 		return fmt.Errorf("failed to update expense: %v", err)
 	}

@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/tanq16/expenseowl/internal/ai"
 	"github.com/tanq16/expenseowl/internal/api"
@@ -43,6 +45,17 @@ func bootstrapAdmin(store storage.Storage) {
 		log.Fatalf("Failed to create initial admin user: %v", err)
 	}
 	log.Printf("Created initial admin user '%s'", username)
+}
+
+// receiptsDir returns the directory where receipt images are stored, alongside
+// the JSON data dir so it lands on the same persistent volume. For Postgres the
+// STORAGE_URL is a DB URL, so fall back to the default "data" dir.
+func receiptsDir() string {
+	dataDir := os.Getenv("STORAGE_URL")
+	if dataDir == "" || strings.EqualFold(os.Getenv("STORAGE_TYPE"), "postgres") {
+		dataDir = "data"
+	}
+	return filepath.Join(dataDir, "receipts")
 }
 
 // setupTelegram enables the Telegram bot if its env vars are present and
@@ -90,6 +103,7 @@ func runServer(port int) {
 
 	sessions := auth.NewSessionStore()
 	handler := api.NewHandler(store, sessions)
+	handler.SetReceiptsDir(receiptsDir())
 	setupTelegram(handler)
 
 	// Version Handler (public)
@@ -170,6 +184,7 @@ func runServer(port int) {
 	http.HandleFunc("/expense/edit", handler.RequireAPI(handler.EditExpense))               // PUT for edit
 	http.HandleFunc("/expense/delete", handler.RequireAPI(handler.DeleteExpense))           // DELETE for single
 	http.HandleFunc("/expenses/delete", handler.RequireAPI(handler.DeleteMultipleExpenses)) // DELETE for multiple
+	http.HandleFunc("/receipt", handler.RequireAPI(handler.ServeReceipt))                   // GET receipt image
 
 	// Recurring Expenses (protected)
 	http.HandleFunc("/recurring-expense", handler.RequireAPI(handler.AddRecurringExpense))
