@@ -323,7 +323,7 @@
                 item.innerHTML = `
                     <div class="category-handle-area">
                         <span class="drag-handle"><i class="fa-solid fa-grip-lines"></i></span>
-                        <span>${category}</span>
+                        <span>${escapeHTML(category)}</span>
                     </div>
                     <button class="delete-button" onclick="removeCategory(${index})">
                         <i class="fa-solid fa-times"></i>
@@ -446,7 +446,7 @@
                 item.dataset.index = index;
                 item.innerHTML = `
                     <div class="category-handle-area">
-                        <span>${card}</span>
+                        <span>${escapeHTML(card)}</span>
                     </div>
                     <button class="delete-button" onclick="removeCard(${index})">
                         <i class="fa-solid fa-times"></i>
@@ -477,7 +477,7 @@
         }
 
         function populateCardSelects() {
-            const options = `<option value="">(sin tarjeta)</option>` + cards.map(c => `<option value="${c}">${c}</option>`).join('');
+            const options = `<option value="">(sin tarjeta)</option>` + cards.map(c => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join('');
             document.getElementById('recurringCard').innerHTML = options;
             document.getElementById('editRecurringCard').innerHTML = options;
         }
@@ -693,10 +693,10 @@
                     <tbody>
                         ${recurring.map(r => `
                             <tr>
-                                <td>${r.name}</td>
+                                <td>${escapeHTML(r.name)}</td>
                                 <td>${formatCurrency(r.amount)}</td>
-                                <td>${r.category}</td>
-                                <td>${r.interval.charAt(0).toUpperCase() + r.interval.slice(1)}</td>
+                                <td>${escapeHTML(r.category)}</td>
+                                <td>${escapeHTML(r.interval.charAt(0).toUpperCase() + r.interval.slice(1))}</td>
                                 <td>${findNextOccurrence(r)}</td>
                                 <td>
                                     <button class="edit-button" onclick="showRecurringEditModal('${r.id}')"><i class="fa-solid fa-pen-to-square"></i></button>
@@ -901,8 +901,8 @@
                 renderCards();
                 populateCurrencySelect();
                 populateStartDateInput();
-                document.getElementById('recurringCategory').innerHTML = categories.map(c => `<option value="${c}">${c}</option>`).join('');
-                document.getElementById('editRecurringCategory').innerHTML = categories.map(c => `<option value="${c}">${c}</option>`).join('');
+                document.getElementById('recurringCategory').innerHTML = categories.map(c => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join('');
+                document.getElementById('editRecurringCategory').innerHTML = categories.map(c => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join('');
                 populateCardSelects();
                 renderRecurringExpenses(recurringExpenses);
 

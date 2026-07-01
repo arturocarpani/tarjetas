@@ -201,7 +201,7 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 			Name:     strings.TrimSpace(record[colMap["name"]]),
 			Category: category,
 			Card:     card,
-			Amount:   amount,
+			Amount:   -math.Abs(amount), // expenses stored negative (matches ImportOldCSV and the frontend filter)
 			Currency: localCurrency,
 			Date:     date,
 			Tags:     tags,

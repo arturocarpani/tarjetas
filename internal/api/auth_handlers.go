@@ -238,7 +238,42 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
 	}
+	// Cascade: remove the user's expenses, recurring rules and receipt files so
+	// they don't linger orphaned (still counted in admin totals, unmanageable).
+	h.cleanupUserData(id)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
+}
+
+// cleanupUserData deletes all expenses, recurring rules and receipt files owned
+// by a user. Best-effort: logs errors but doesn't abort.
+func (h *Handler) cleanupUserData(userID string) {
+	if expenses, err := h.storage.GetAllExpenses(); err == nil {
+		var ids []string
+		for _, e := range expenses {
+			if e.UserID == userID {
+				ids = append(ids, e.ID)
+				if e.ReceiptPath != "" {
+					h.deleteReceipt(e.ReceiptPath)
+				}
+			}
+		}
+		if len(ids) > 0 {
+			if err := h.storage.RemoveMultipleExpenses(ids); err != nil {
+				log.Printf("API ERROR: cleanup expenses for user %s: %v\n", userID, err)
+			}
+		}
+	} else {
+		log.Printf("API ERROR: cleanup could not list expenses for user %s: %v\n", userID, err)
+	}
+	if recurring, err := h.storage.GetRecurringExpenses(); err == nil {
+		for _, r := range recurring {
+			if r.UserID == userID {
+				if err := h.storage.RemoveRecurringExpense(r.ID, true); err != nil {
+					log.Printf("API ERROR: cleanup recurring %s for user %s: %v\n", r.ID, userID, err)
+				}
+			}
+		}
+	}
 }
 
 // UpdateUserPassword resets a user's password (admin only).

@@ -186,7 +186,7 @@ variables (both optional):
 | Variable | Sample Value | Details |
 | --- | --- | --- |
 | ADMIN_USERNAME | admin | username for the bootstrap admin (defaults to `admin`) |
-| ADMIN_PASSWORD | a-strong-secret | password for the bootstrap admin (defaults to `admin` — **change it immediately**) |
+| ADMIN_PASSWORD | a-strong-secret | **required on first run** — if no users exist and this is unset, the app refuses to start (no insecure default admin) |
 
 Sessions are kept in memory (cookie-based), so a restart requires logging in again.
 

@@ -113,7 +113,36 @@ func (s *jsonStore) writeUsersFile(data *usersFileData) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.usersPath, content, 0644)
+	return writeFileAtomic(s.usersPath, content, 0644)
+}
+
+// writeFileAtomic writes data to a temp file in the same directory, fsyncs it,
+// and renames it over the target. Rename is atomic on the same filesystem, so a
+// crash/redeploy mid-write can never leave a truncated or empty file (which with
+// os.WriteFile's O_TRUNC would lose ALL records, not just the last write).
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op if the rename succeeded
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
 
 func (s *jsonStore) CreateUser(user User) error {
@@ -290,7 +319,7 @@ func (s *jsonStore) writeExpensesFile(path string, data *expensesFileData) error
 		return err
 	}
 	log.Println("Wrote expenses file")
-	return os.WriteFile(path, content, 0644)
+	return writeFileAtomic(path, content, 0644)
 }
 
 func (s *jsonStore) readConfigFile(path string) (*Config, error) {
@@ -312,7 +341,7 @@ func (s *jsonStore) writeConfigFile(path string, data *Config) error {
 		return err
 	}
 	log.Println("Wrote config file")
-	return os.WriteFile(path, content, 0644)
+	return writeFileAtomic(path, content, 0644)
 }
 
 // ------------------------------------------------------------
@@ -454,7 +483,7 @@ func (s *jsonStore) AddRecurringExpense(recurringExpense RecurringExpense) error
 		return fmt.Errorf("failed to write config file: %v", err)
 	}
 	expensesToAdd := generateExpensesFromRecurring(recurringExpense, false)
-	return s.AddMultipleExpenses(expensesToAdd)
+	return s.addMultipleLocked(expensesToAdd)
 }
 
 func (s *jsonStore) RemoveRecurringExpense(id string, removeAll bool) error {
@@ -619,7 +648,17 @@ func (s *jsonStore) RemoveExpense(id string) error {
 	return s.writeExpensesFile(s.filePath, data)
 }
 
+// AddMultipleExpenses is the public, lock-taking entry point.
 func (s *jsonStore) AddMultipleExpenses(expensesToAdd []Expense) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.addMultipleLocked(expensesToAdd)
+}
+
+// addMultipleLocked appends expenses assuming s.mu is already held (callers that
+// already hold the write lock, e.g. AddRecurringExpense, use this directly to
+// avoid re-locking the non-reentrant RWMutex).
+func (s *jsonStore) addMultipleLocked(expensesToAdd []Expense) error {
 	if len(expensesToAdd) == 0 {
 		return nil
 	}
