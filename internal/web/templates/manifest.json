@@ -1,10 +1,10 @@
 {
-    "name": "ExpenseOwl",
-    "short_name": "ExpenseOwl",
+    "name": "Tarjetas",
+    "short_name": "Tarjetas",
     "start_url": "/",
     "display": "standalone",
-    "background_color": "#1a1a1a",
-    "theme_color": "#1a1a1a",
+    "background_color": "#0f172a",
+    "theme_color": "#0f172a",
     "icons": [
         {
             "src": "/pwa/icon-192.png",

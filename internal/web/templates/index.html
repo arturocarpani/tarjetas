@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/fa.min.css">
-    <meta name="theme-color" content="#1a1a1a">
+    <meta name="theme-color" content="#0f172a">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="manifest" href="/manifest.json">
@@ -27,16 +27,14 @@
             });
         }
     </script>
-    <title>ExpenseOwl Dashboard</title>
+    <title>Tarjetas · Panel</title>
     <script src="/chart.min.js"></script>
 </head>
 <body>
     <div class="container">
         <header>
             <div class="nav-bar">
-                <a href="/">
-                    <img src="/pwa/icon-192.png" alt="ExpenseOwl Logo" height="85" style="vertical-align: middle; margin-right: 20px;">
-                </a>
+                <a href="/" class="brand">Tarjetas</a>
                 <a href="/" class="view-button active" data-tooltip="Panel">
                     <i class="fa-solid fa-chart-pie"></i>
                 </a>
@@ -364,7 +362,7 @@
                     datasets: [{
                         data: categoryData.map(c => c.total),
                         backgroundColor: categoryData.map(c => categoryColors[c.category]),
-                        borderColor: '#1a1a1a',
+                        borderColor: '#0f172a',
                         borderWidth: 1
                     }]
                 },

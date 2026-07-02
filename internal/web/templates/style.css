@@ -1,39 +1,39 @@
 :root {
     /* Default theme: Dark mode */
-    --bg-primary: #081528;
-    --bg-secondary: #101f3b;
-    --text-primary: #f4f4f4;
-    --text-secondary: #b3b3b3;
-    --border: #1a365d;
-    --accent: #69afde;
+    --bg-primary: #0f172a;
+    --bg-secondary: #1e293b;
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --border: #334155;
+    --accent: #6366f1;
 }
 
 /* Light theme override */
 html[data-theme='light'] {
-    --bg-primary: #f2e5d7;
-    --bg-secondary: #faecdd;
-    --text-primary: #2e2e2e;
-    --text-secondary: #3e3e3e;
-    --border: #e6ddd4;
+    --bg-primary: #f8fafc;
+    --bg-secondary: #ffffff;
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --border: #e2e8f0;
 }
 
 /* Dark theme override */
 html[data-theme='dark'] {
-    --bg-primary: #081528;
-    --bg-secondary: #101f3b;
-    --text-primary: #f4f4f4;
-    --text-secondary: #b3b3b3;
-    --border: #1a365d;
+    --bg-primary: #0f172a;
+    --bg-secondary: #1e293b;
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --border: #334155;
 }
 
 /* System preference for light mode (when no theme is set) */
 @media (prefers-color-scheme: light) {
     :root:not([data-theme]) {
-        --bg-primary: #f2e5d7;
-        --bg-secondary: #faecdd;
-        --text-primary: #2e2e2e;
-        --text-secondary: #3e3e3e;
-        --border: #e6ddd4;
+        --bg-primary: #f8fafc;
+        --bg-secondary: #ffffff;
+        --text-primary: #0f172a;
+        --text-secondary: #475569;
+        --border: #e2e8f0;
     }
 }
 
@@ -201,6 +201,38 @@ header {
     gap: 1rem;
     margin-bottom: 1rem;
     align-items: center;
+}
+
+.brand {
+    font-size: 1.75rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+    text-decoration: none;
+    margin-right: 1.25rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: color 0.2s;
+}
+
+.brand::before {
+    content: "";
+    width: 1.4rem;
+    height: 1.4rem;
+    border-radius: 0.35rem;
+    background: linear-gradient(135deg, var(--accent), #818cf8);
+    flex-shrink: 0;
+}
+
+.brand:hover {
+    color: var(--accent);
+}
+
+.brand-login {
+    justify-content: center;
+    font-size: 2rem;
+    margin: 0 0 0.5rem;
 }
 
 .view-button {
