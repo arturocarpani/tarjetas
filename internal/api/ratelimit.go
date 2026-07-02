@@ -44,6 +44,8 @@ func (r *rateLimiter) reset(key string) {
 }
 
 // pruned returns key's attempts within the window (caller holds the lock).
+// When nothing remains it drops the key entirely so the map doesn't accumulate
+// an entry per IP that ever probed the limiter.
 func (r *rateLimiter) pruned(key string) []time.Time {
 	cutoff := time.Now().Add(-r.window)
 	kept := r.attempts[key][:0]
@@ -52,16 +54,35 @@ func (r *rateLimiter) pruned(key string) []time.Time {
 			kept = append(kept, t)
 		}
 	}
+	if len(kept) == 0 {
+		delete(r.attempts, key)
+		return nil
+	}
 	r.attempts[key] = kept
 	return kept
 }
 
-// clientIP extracts the client IP, honoring X-Forwarded-For (Railway/proxies)
-// then falling back to RemoteAddr.
+// cleanup prunes expired attempts across all keys. Meant to be called
+// periodically by a janitor since pruned() otherwise only runs for keys that
+// are actively probed.
+func (r *rateLimiter) cleanup() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for key := range r.attempts {
+		r.pruned(key)
+	}
+}
+
+// clientIP extracts the client IP used as the rate-limit key. Behind a single
+// trusted proxy (Railway) the real client address is the RIGHT-most value the
+// proxy appends to X-Forwarded-For; the left-most entries are supplied by the
+// client and must never be trusted, otherwise an attacker rotating a fake
+// X-Forwarded-For defeats the limiter entirely. Falls back to RemoteAddr.
 func clientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if first := strings.TrimSpace(strings.Split(xff, ",")[0]); first != "" {
-			return first
+		parts := strings.Split(xff, ",")
+		if last := strings.TrimSpace(parts[len(parts)-1]); last != "" {
+			return last
 		}
 	}
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {

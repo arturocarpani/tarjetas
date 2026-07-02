@@ -14,6 +14,11 @@ const userContextKey contextKey = "currentUser"
 // SessionCookieName is the cookie that carries the session token.
 const SessionCookieName = "session"
 
+// maxAPIBodyBytes caps request bodies on authenticated endpoints so a single
+// oversized payload can't exhaust memory. Sized to comfortably fit CSV imports
+// (the multipart form threshold is 10MB); JSON endpoints use a fraction of it.
+const maxAPIBodyBytes = 12 << 20 // 12 MiB
+
 // resolveUser reads the session cookie and returns the authenticated user.
 func (h *Handler) resolveUser(r *http.Request) (storage.User, bool) {
 	cookie, err := r.Cookie(SessionCookieName)
@@ -89,6 +94,7 @@ func (h *Handler) RequireAPI(next http.HandlerFunc) http.HandlerFunc {
 			writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "Authentication required"})
 			return
 		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxAPIBodyBytes)
 		ctx := context.WithValue(r.Context(), userContextKey, user)
 		next(w, r.WithContext(ctx))
 	}

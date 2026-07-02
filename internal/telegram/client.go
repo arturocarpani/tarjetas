@@ -200,7 +200,10 @@ func (c *Client) DownloadFile(filePath string) ([]byte, string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", fmt.Errorf("failed to download file: status %d", resp.StatusCode)
 	}
-	data, err := io.ReadAll(resp.Body)
+	// Cap the read: Telegram tops out ~20MB, but don't rely on the remote to
+	// bound our memory. 25MB leaves headroom without allowing an unbounded read.
+	const maxFileBytes = 25 << 20
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxFileBytes))
 	if err != nil {
 		return nil, "", err
 	}

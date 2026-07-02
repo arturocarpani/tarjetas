@@ -34,6 +34,28 @@ func (h *Handler) SetReceiptsDir(dir string) {
 	h.receiptsDir = dir
 }
 
+// StartJanitor launches a background goroutine that periodically reclaims
+// expired entries from the in-memory maps (sessions, login rate limiter and
+// pending Telegram confirmations) so none of them grow for the process
+// lifetime. Safe to call once at startup.
+func (h *Handler) StartJanitor() {
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if h.sessions != nil {
+				h.sessions.Cleanup()
+			}
+			if h.loginLimiter != nil {
+				h.loginLimiter.cleanup()
+			}
+			if h.tgPending != nil {
+				h.tgPending.sweep()
+			}
+		}
+	}()
+}
+
 // NewHandler creates a new API handler
 func NewHandler(s storage.Storage, sessions *auth.SessionStore) *Handler {
 	return &Handler{

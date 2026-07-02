@@ -4,12 +4,18 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/tanq16/expenseowl/internal/auth"
 	"github.com/tanq16/expenseowl/internal/storage"
 	"github.com/tanq16/expenseowl/internal/web"
 )
+
+// telegramIDPattern matches a Telegram chat ID: an integer, optionally negative
+// (group chats). Enforcing this keeps the value safe to interpolate in the
+// admin UI and prevents ambiguous/injected identifiers.
+var telegramIDPattern = regexp.MustCompile(`^-?\d+$`)
 
 // userDTO is the sanitized view of a user returned by the API (no password hash).
 type userDTO struct {
@@ -46,6 +52,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusTooManyRequests, ErrorResponse{Error: "Demasiados intentos. Esperá unos minutos e intentá de nuevo."})
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10) // credentials are tiny; cap the public endpoint
 	var creds struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -85,8 +92,13 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toUserDTO(user))
 }
 
-// Logout clears the session and cookie.
+// Logout clears the session and cookie. Requires POST so a cross-site GET
+// (e.g. an <img src="/logout">) can't force-logout the user.
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
 	if cookie, err := r.Cookie(SessionCookieName); err == nil {
 		h.sessions.Delete(cookie.Value)
 	}
@@ -183,6 +195,10 @@ func (h *Handler) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.TelegramID = strings.TrimSpace(req.TelegramID)
+	if req.TelegramID != "" && !telegramIDPattern.MatchString(req.TelegramID) {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "El Telegram ID debe ser numérico"})
+		return
+	}
 	// CreateUser only enforces username uniqueness, so guard the Telegram ID here
 	// (same invariant as UpdateUserTelegramID) — two users sharing a chat.id would
 	// make GetUserByTelegramID ambiguous for the bot.
@@ -221,7 +237,12 @@ func (h *Handler) UpdateUserTelegramID(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "ID is required"})
 		return
 	}
-	if err := h.storage.UpdateUserTelegramID(req.ID, strings.TrimSpace(req.TelegramID)); err != nil {
+	req.TelegramID = strings.TrimSpace(req.TelegramID)
+	if req.TelegramID != "" && !telegramIDPattern.MatchString(req.TelegramID) {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "El Telegram ID debe ser numérico"})
+		return
+	}
+	if err := h.storage.UpdateUserTelegramID(req.ID, req.TelegramID); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
