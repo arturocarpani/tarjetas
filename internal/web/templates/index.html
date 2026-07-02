@@ -576,12 +576,16 @@
         }
 
         document.getElementById('prevMonth').addEventListener('click', () => {
+            // Pin day 1 before shifting so end-of-month days (29-31) don't roll
+            // over and skip/repeat a month (e.g. Jul 31 - 1 month would be Jul 1).
+            currentDate.setDate(1);
             currentDate.setMonth(currentDate.getMonth() - 1);
             updateMonthDisplay();
             updateChartAndLegend();
         });
 
         document.getElementById('nextMonth').addEventListener('click', () => {
+            currentDate.setDate(1);
             currentDate.setMonth(currentDate.getMonth() + 1);
             updateMonthDisplay();
             updateChartAndLegend();

@@ -287,6 +287,13 @@ func (h *Handler) handleCallback(cq *telegram.CallbackQuery) {
 		h.reply(chatID, "Esta confirmación expiró. Mandá el gasto de nuevo.")
 		return
 	}
+	// Only act if the tap comes from the keyboard we're currently tracking. If
+	// the user sent a newer expense, its keyboard replaced this one in the map;
+	// a tap on the stale message must not operate on the newer pending expense.
+	if p.messageID != 0 && cq.Message.MessageID != p.messageID {
+		h.tgPending.mu.Unlock()
+		return
+	}
 	p.updatedAt = time.Now()
 	var (
 		toSave     *pendingExpense

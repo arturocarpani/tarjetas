@@ -84,12 +84,20 @@ func InitializeJsonStore(baseConfig SystemConfig) (*jsonStore, error) {
 		log.Println("Found existing users storage file")
 	}
 
-	return &jsonStore{
+	store := &jsonStore{
 		configPath: configPath,
 		filePath:   filePath,
 		usersPath:  usersPath,
 		defaults:   map[string]string{},
-	}, nil
+	}
+	// Seed defaults from the persisted config so expenses added before an admin
+	// re-saves settings (e.g. right after a restart) still get the configured
+	// currency instead of an empty string.
+	if cfg, err := store.GetConfig(); err == nil {
+		store.defaults["currency"] = cfg.Currency
+		store.defaults["start_date"] = fmt.Sprintf("%d", cfg.StartDate)
+	}
+	return store, nil
 }
 
 // ------------------------------------------------------------

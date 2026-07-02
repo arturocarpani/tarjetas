@@ -222,11 +222,11 @@
             );
 
             const tableContainer = document.getElementById('tableContainer');
-            const total = expensesForTable
-                .filter(e => e.amount < 0)
-                .reduce((sum, e) => sum + Math.abs(e.amount), 0);
+            // Group the total by currency (no conversion) so ARS and USD aren't
+            // summed as raw numbers — matches the dashboard's multi-currency total.
+            const totals = sumByCurrency(expensesForTable);
             const totalHtml = expensesForTable.length
-                ? `<div class="cashflow-container" style="margin-top:1rem;"><div class="cashflow-item expenses"><div class="cashflow-label">Total (${expensesForTable.length} gastos)</div><div class="cashflow-value">${formatCurrency(total)}</div></div></div>`
+                ? `<div class="cashflow-container" style="margin-top:1rem;"><div class="cashflow-item expenses"><div class="cashflow-label">Total (${expensesForTable.length} gastos)</div><div class="cashflow-value">${fmtByCurrency(totals)}</div></div></div>`
                 : '';
             tableContainer.innerHTML = createTable(expensesForTable) + totalHtml;
         }
@@ -423,12 +423,16 @@
         });
 
         document.getElementById('prevMonth').addEventListener('click', () => {
+            // Pin day 1 before shifting so end-of-month days (29-31) don't roll
+            // over and skip/repeat a month.
+            currentDate.setDate(1);
             currentDate.setMonth(currentDate.getMonth() - 1);
             updateMonthDisplay();
             updateTable();
         });
 
         document.getElementById('nextMonth').addEventListener('click', () => {
+            currentDate.setDate(1);
             currentDate.setMonth(currentDate.getMonth() + 1);
             updateMonthDisplay();
             updateTable();

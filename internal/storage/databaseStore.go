@@ -94,7 +94,14 @@ func InitializePostgresStore(baseConfig SystemConfig) (Storage, error) {
 	if err := createTables(db); err != nil {
 		return nil, fmt.Errorf("failed to create database tables: %v", err)
 	}
-	return &databaseStore{db: db, defaults: map[string]string{}}, nil
+	store := &databaseStore{db: db, defaults: map[string]string{}}
+	// Seed defaults from the persisted config so expenses added before settings
+	// are re-saved (e.g. right after a restart) get the configured currency.
+	if cfg, err := store.GetConfig(); err == nil {
+		store.defaults["currency"] = cfg.Currency
+		store.defaults["start_date"] = fmt.Sprintf("%d", cfg.StartDate)
+	}
+	return store, nil
 }
 
 func makeDBURL(baseConfig SystemConfig) string {

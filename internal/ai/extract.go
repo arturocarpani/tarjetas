@@ -38,6 +38,7 @@ type extracted struct {
 	Category string   `json:"category"`
 	Card     string   `json:"card"`
 	Date     string   `json:"date"`
+	Currency string   `json:"currency"`
 	Tags     []string `json:"tags"`
 }
 
@@ -77,13 +78,18 @@ func (e *Extractor) Extract(ctx context.Context, text string, image []byte, medi
 					"type":        "string",
 					"description": "Expense date as YYYY-MM-DD, or empty string if not stated (defaults to today).",
 				},
+				"currency": map[string]any{
+					"type":        "string",
+					"enum":        []string{"ars", "usd"},
+					"description": "'usd' only if the amount is clearly in US dollars (USD, US$, 'dólares'); otherwise 'ars'.",
+				},
 				"tags": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
 					"description": "Optional tags; empty array if none.",
 				},
 			},
-			Required: []string{"name", "amount", "category", "card", "date", "tags"},
+			Required: []string{"name", "amount", "category", "card", "date", "currency", "tags"},
 			ExtraFields: map[string]any{
 				"additionalProperties": false,
 			},
@@ -99,6 +105,7 @@ func (e *Extractor) Extract(ctx context.Context, text string, image []byte, medi
 		sb.WriteString("No cards are configured; always use an empty string for card.\n")
 	}
 	sb.WriteString("Map the expense to the closest allowed category. Amount is a positive number. ")
+	sb.WriteString(fmt.Sprintf("Today's date is %s; resolve relative dates like 'hoy'/'ayer' against it. ", time.Now().Format("2006-01-02")))
 	sb.WriteString("For the date: if the receipt or message states a date (look for labels like 'FECHA', 'DATE', or a printed date), ")
 	sb.WriteString("return it as YYYY-MM-DD; only if there is truly no date anywhere, use an empty string. ")
 	sb.WriteString("For the name: if the user wrote a concept/description, prefer it; otherwise use the merchant name. ")
@@ -144,7 +151,16 @@ func (e *Extractor) Extract(ctx context.Context, text string, image []byte, medi
 		return storage.Expense{}, fmt.Errorf("failed to parse model output: %v", err)
 	}
 
-	return toExpense(parsed, cards), nil
+	exp := toExpense(parsed, cards)
+	// Use the detected currency when it's one we support; otherwise fall back to
+	// the configured default. The user can still change it from the keyboard.
+	switch parsed.Currency {
+	case "usd", "ars":
+		exp.Currency = parsed.Currency
+	default:
+		exp.Currency = currency
+	}
+	return exp, nil
 }
 
 // toExpense converts the model output into a partial Expense (no UserID/Currency).
@@ -157,10 +173,10 @@ func toExpense(p extracted, cards []string) storage.Expense {
 			date = time.Date(parsed.Year(), parsed.Month(), parsed.Day(), now.Hour(), now.Minute(), now.Second(), 0, now.Location())
 		}
 	}
-	card := p.Card
-	if card != "" && !containsFold(cards, card) {
-		card = "" // model guessed a card we don't have; drop it
-	}
+	// Canonicalize the card to the configured casing: the model may return
+	// "visa" while the card is "Visa", and downstream card filtering is
+	// case-sensitive, so store the exact configured value.
+	card := canonicalCard(cards, p.Card)
 	return storage.Expense{
 		Name:     p.Name,
 		Amount:   -math.Abs(p.Amount), // expenses are stored negative
@@ -171,11 +187,16 @@ func toExpense(p extracted, cards []string) storage.Expense {
 	}
 }
 
-func containsFold(list []string, v string) bool {
-	for _, item := range list {
+// canonicalCard returns the configured card matching v case-insensitively, or ""
+// if none matches (the model guessed a card we don't have).
+func canonicalCard(cards []string, v string) string {
+	if v == "" {
+		return ""
+	}
+	for _, item := range cards {
 		if strings.EqualFold(item, v) {
-			return true
+			return item
 		}
 	}
-	return false
+	return ""
 }

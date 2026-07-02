@@ -39,8 +39,10 @@ func TestToExpenseDropsUnknownCard(t *testing.T) {
 	if got.Card != "" {
 		t.Fatalf("card = %q, want empty (unknown card dropped)", got.Card)
 	}
+	// a case-insensitive match is canonicalized to the configured casing so
+	// downstream (case-sensitive) card filtering keeps working
 	got = toExpense(extracted{Name: "X", Amount: 1, Category: "Food", Card: "visa"}, []string{"Visa", "Master"})
-	if got.Card != "visa" {
-		t.Fatalf("card = %q, want kept (case-insensitive match)", got.Card)
+	if got.Card != "Visa" {
+		t.Fatalf("card = %q, want \"Visa\" (canonicalized to configured casing)", got.Card)
 	}
 }
