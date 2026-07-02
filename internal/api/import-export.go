@@ -200,25 +200,28 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Check if expense exists by ID, if provided - without doing a clash resolution
+		csvID := ""
 		if idExists {
-			id := record[idIdx]
-			if _, err := h.storage.GetExpense(id); err == nil {
-				log.Printf("Info: Skipping row %d because expense with ID '%s' already exists\n", i+2, id)
-				skippedCount++
-				continue
+			csvID = strings.TrimSpace(record[idIdx])
+			if csvID != "" {
+				if _, err := h.storage.GetExpense(csvID); err == nil {
+					log.Printf("Info: Skipping row %d because expense with ID '%s' already exists\n", i+2, csvID)
+					skippedCount++
+					continue
+				}
 			}
 		}
 
 		// Check for currency field, if provided - default is retrieved
 		localCurrency := currencyVal
 		if currencyExists {
-			currency := record[currencyIdx]
+			currency := strings.ToLower(strings.TrimSpace(record[currencyIdx]))
 			if !slices.Contains(storage.SupportedCurrencies, currency) {
-				log.Printf("Warning: Skipping row %d due to invalid currency: %s\n", i+2, currency)
+				log.Printf("Warning: Skipping row %d due to invalid currency: %s\n", i+2, record[currencyIdx])
 				skippedCount++
 				continue
 			}
-			localCurrency = strings.TrimSpace(currency)
+			localCurrency = currency
 		}
 
 		amount, err := strconv.ParseFloat(record[colMap["amount"]], 64)
@@ -255,6 +258,7 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 		}
 
 		expense := storage.Expense{
+			ID:       csvID, // preserve the exported ID so re-importing a backup is idempotent (empty → store generates one)
 			UserID:   importUser.ID,
 			Name:     strings.TrimSpace(record[colMap["name"]]),
 			Category: category,

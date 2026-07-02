@@ -337,6 +337,7 @@ func (h *Handler) EditExpense(w http.ResponseWriter, r *http.Request) {
 	}
 	expense.UserID = existing.UserID           // preserve ownership
 	expense.ReceiptPath = existing.ReceiptPath // preserve the receipt backup (edit form doesn't send it)
+	expense.RecurringID = existing.RecurringID // preserve the recurring link (edit form doesn't send it)
 	if err := h.storage.UpdateExpense(id, expense); err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to edit expense"})
 		log.Printf("API ERROR: Failed to edit expense: %v\n", err)
@@ -370,6 +371,11 @@ func (h *Handler) DeleteExpense(w http.ResponseWriter, r *http.Request) {
 		log.Printf("API ERROR: Failed to delete expense: %v\n", err)
 		return
 	}
+	// Remove the receipt backup after the expense is gone, so we don't orphan
+	// the image file on disk (the Telegram delete path already does this).
+	if existing.ReceiptPath != "" {
+		h.deleteReceipt(existing.ReceiptPath)
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
 }
 
@@ -386,19 +392,32 @@ func (h *Handler) DeleteMultipleExpenses(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	user, _ := currentUser(r)
-	if !user.IsAdmin {
-		owned := make([]string, 0, len(payload.IDs))
-		for _, id := range payload.IDs {
-			if exp, err := h.storage.GetExpense(id); err == nil && exp.UserID == user.ID {
-				owned = append(owned, id)
-			}
+	// Resolve the IDs we're allowed to delete and capture their receipt paths in
+	// the same pass, so we can clean up the image files afterwards without a
+	// second round of reads.
+	var receipts []string
+	owned := make([]string, 0, len(payload.IDs))
+	for _, id := range payload.IDs {
+		exp, err := h.storage.GetExpense(id)
+		if err != nil {
+			continue
 		}
-		payload.IDs = owned
+		if !user.IsAdmin && exp.UserID != user.ID {
+			continue
+		}
+		owned = append(owned, id)
+		if exp.ReceiptPath != "" {
+			receipts = append(receipts, exp.ReceiptPath)
+		}
 	}
+	payload.IDs = owned
 	if err := h.storage.RemoveMultipleExpenses(payload.IDs); err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to delete multiple expenses"})
 		log.Printf("API ERROR: Failed to delete multiple expenses: %v\n", err)
 		return
+	}
+	for _, path := range receipts {
+		h.deleteReceipt(path)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
 }
