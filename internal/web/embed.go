@@ -43,6 +43,8 @@ func ServeStatic(w http.ResponseWriter, staticPath string) error {
 		w.Header().Set("Content-Type", "image/svg+xml")
 	case ".png":
 		w.Header().Set("Content-Type", "image/png")
+	case ".gif":
+		w.Header().Set("Content-Type", "image/gif")
 	case ".ico":
 		w.Header().Set("Content-Type", "image/x-icon")
 	case ".json":
