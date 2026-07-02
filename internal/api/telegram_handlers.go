@@ -51,6 +51,19 @@ func newTGPendingStore() *tgPendingStore {
 	return &tgPendingStore{m: map[int64]*pendingExpense{}}
 }
 
+// sweep drops pending confirmations past their TTL. Without it an abandoned
+// photo confirmation pins its image bytes in memory until the same chat
+// interacts again (the only place the lazy delete happens).
+func (s *tgPendingStore) sweep() {
+	s.mu.Lock()
+	for chatID, p := range s.m {
+		if time.Since(p.updatedAt) > pendingTTL {
+			delete(s.m, chatID)
+		}
+	}
+	s.mu.Unlock()
+}
+
 // EnableTelegram wires the Telegram bot into the handler. Kept separate from
 // NewHandler so the existing constructor signature (and its tests) stay intact.
 func (h *Handler) EnableTelegram(client *telegram.Client, extractor *ai.Extractor, webhookSecret string) {
@@ -86,6 +99,7 @@ func (h *Handler) TelegramWebhook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "Invalid secret token"})
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // updates are small (photos are fetched separately)
 	var update telegram.Update
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid request body"})

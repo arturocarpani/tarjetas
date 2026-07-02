@@ -14,6 +14,21 @@ import (
 	"github.com/tanq16/expenseowl/internal/storage"
 )
 
+// csvSafe neutralizes spreadsheet formula/DDE injection: a text cell beginning
+// with one of = + @ (or a tab/CR) is prefixed with a single quote so Excel and
+// Sheets treat it as text. Applied only to free-text columns — never to the
+// numeric Amount, which legitimately starts with '-' and must round-trip.
+func csvSafe(s string) string {
+	if s == "" {
+		return s
+	}
+	switch s[0] {
+	case '=', '+', '@', '\t', '\r':
+		return "'" + s
+	}
+	return s
+}
+
 // exports all expenses to CSV
 func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -82,14 +97,14 @@ func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	for _, expense := range expenses {
 		record := []string{
 			expense.ID,
-			expense.Name,
-			expense.Category,
-			expense.Card,
+			csvSafe(expense.Name),
+			csvSafe(expense.Category),
+			csvSafe(expense.Card),
 			strconv.FormatFloat(expense.Amount, 'f', 2, 64),
 			expense.Currency,
 			expense.Date.Format(time.RFC3339),
-			strings.Join(expense.Tags, ","),
-			names[expense.UserID],
+			csvSafe(strings.Join(expense.Tags, ",")),
+			csvSafe(names[expense.UserID]),
 		}
 		if err := writer.Write(record); err != nil {
 			log.Printf("API ERROR: Failed to write CSV record for expense ID %s: %v\n", expense.ID, err)

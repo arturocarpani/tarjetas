@@ -92,6 +92,20 @@ func (s *SessionStore) Delete(token string) {
 	s.mu.Unlock()
 }
 
+// Cleanup removes expired sessions. Get() also expires entries lazily, but only
+// for tokens presented again; this sweep reclaims sessions that are simply
+// abandoned so the map doesn't grow for the process lifetime.
+func (s *SessionStore) Cleanup() {
+	now := time.Now()
+	s.mu.Lock()
+	for token, sess := range s.sessions {
+		if now.After(sess.expires) {
+			delete(s.sessions, token)
+		}
+	}
+	s.mu.Unlock()
+}
+
 // DeleteByUser removes every session belonging to a user (e.g. on password
 // reset or account deletion) so compromised sessions don't outlive the change.
 func (s *SessionStore) DeleteByUser(userID string) {

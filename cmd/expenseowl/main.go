@@ -23,6 +23,32 @@ import (
 
 var version = "dev"
 
+// securityHeaders wraps the mux to add baseline hardening headers to every
+// response. The CSP keeps 'unsafe-inline' because the templates rely on inline
+// <script>/<style> and style="" attributes, but still restricts every source
+// to same-origin (blocking external script/exfiltration and, via
+// frame-ancestors, clickjacking). Images allow data: for embedded icons.
+func securityHeaders(next http.Handler) http.Handler {
+	const csp = "default-src 'self'; " +
+		"script-src 'self' 'unsafe-inline'; " +
+		"style-src 'self' 'unsafe-inline'; " +
+		"img-src 'self' data:; " +
+		"font-src 'self'; " +
+		"connect-src 'self'; " +
+		"object-src 'none'; " +
+		"base-uri 'self'; " +
+		"form-action 'self'; " +
+		"frame-ancestors 'none'"
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", csp)
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // bootstrapAdmin creates the initial admin account if no users exist yet.
 func bootstrapAdmin(store storage.Storage) {
 	count, err := store.CountUsers()
@@ -109,6 +135,7 @@ func runServer(port int) {
 	handler.SetReceiptsDir(receiptsDir())
 	setupTelegram(handler)
 	handler.StartMonthlyReporter() // no-op unless the Telegram bot is enabled
+	handler.StartJanitor()         // periodic cleanup of in-memory maps
 
 	// Version Handler (public)
 	http.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
@@ -203,6 +230,7 @@ func runServer(port int) {
 
 	srv := &http.Server{
 		Addr:              fmt.Sprint(":", port),
+		Handler:           securityHeaders(http.DefaultServeMux),
 		ReadHeaderTimeout: 15 * time.Second, // Slowloris protection
 		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      300 * time.Second, // generous for large CSV imports

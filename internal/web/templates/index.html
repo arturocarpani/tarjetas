@@ -44,9 +44,11 @@
                 <a href="/settings" class="view-button" data-tooltip="Ajustes">
                     <i class="fa-solid fa-gear"></i>
                 </a>
-                <a href="/logout" class="view-button" data-tooltip="Salir">
-                    <i class="fa-solid fa-right-from-bracket"></i>
-                </a>
+                <form action="/logout" method="post" style="margin:0">
+                    <button type="submit" class="view-button" data-tooltip="Salir" aria-label="Salir">
+                        <i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i>
+                    </button>
+                </form>
             </div>
         </header>
 

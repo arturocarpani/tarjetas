@@ -31,9 +31,11 @@
                 <a href="/settings" class="view-button active" data-tooltip="Ajustes">
                     <i class="fa-solid fa-gear"></i>
                 </a>
-                <a href="/logout" class="view-button" data-tooltip="Salir">
-                    <i class="fa-solid fa-right-from-bracket"></i>
-                </a>
+                <form action="/logout" method="post" style="margin:0">
+                    <button type="submit" class="view-button" data-tooltip="Salir" aria-label="Salir">
+                        <i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i>
+                    </button>
+                </form>
             </div>
         </header>
 
@@ -932,12 +934,22 @@
                     <div class="category-item">
                         <span>${escapeHTML(u.username)}${u.isAdmin ? ' <strong>(admin)</strong>' : ''}${u.telegramID ? ` <small>· TG ${escapeHTML(u.telegramID)}</small>` : ''}</span>
                         <span>
-                            <button class="nav-button" onclick="setUserTelegram('${u.id}', '${escapeHTML(u.username)}', '${escapeHTML(u.telegramID || '')}')">Telegram</button>
-                            <button class="nav-button" onclick="resetUserPassword('${u.id}', '${escapeHTML(u.username)}')">Reset clave</button>
-                            <button class="nav-button" onclick="deleteUser('${u.id}', '${escapeHTML(u.username)}')">Eliminar</button>
+                            <button class="nav-button" data-action="telegram" data-id="${escapeHTML(u.id)}" data-username="${escapeHTML(u.username)}" data-telegram="${escapeHTML(u.telegramID || '')}">Telegram</button>
+                            <button class="nav-button" data-action="password" data-id="${escapeHTML(u.id)}" data-username="${escapeHTML(u.username)}">Reset clave</button>
+                            <button class="nav-button" data-action="delete" data-id="${escapeHTML(u.id)}" data-username="${escapeHTML(u.username)}">Eliminar</button>
                         </span>
                     </div>
                 `).join('');
+                // Wire actions via data-attributes instead of inline onclick, so a
+                // username/telegramID can never break out of the handler string.
+                list.querySelectorAll('button[data-action]').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const { action, id, username, telegram } = btn.dataset;
+                        if (action === 'telegram') setUserTelegram(id, username, telegram || '');
+                        else if (action === 'password') resetUserPassword(id, username);
+                        else if (action === 'delete') deleteUser(id, username);
+                    });
+                });
             } catch (e) {
                 showMessage('usersMessage', 'No se pudieron cargar los usuarios', false);
             }
