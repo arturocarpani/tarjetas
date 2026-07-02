@@ -1,13 +1,33 @@
 package web
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"net/http"
 	"path/filepath"
+	"sync"
+	"time"
 )
 
 //go:embed templates
 var content embed.FS
+
+// etagCache memoizes the ETag per static path. The embedded content is fixed
+// for the lifetime of the binary, so a given path's hash never changes at
+// runtime — and it changes automatically on the next build/deploy.
+var etagCache sync.Map // path -> string
+
+func staticETag(path string, data []byte) string {
+	if v, ok := etagCache.Load(path); ok {
+		return v.(string)
+	}
+	sum := sha256.Sum256(data)
+	etag := `"` + hex.EncodeToString(sum[:16]) + `"`
+	etagCache.Store(path, etag)
+	return etag
+}
 
 func GetTemplates() *embed.FS {
 	return &content
@@ -22,7 +42,7 @@ func ServeTemplate(w http.ResponseWriter, templateName string) error {
 	return err
 }
 
-func ServeStatic(w http.ResponseWriter, staticPath string) error {
+func ServeStatic(w http.ResponseWriter, r *http.Request, staticPath string) error {
 	staticContent, err := content.ReadFile("templates" + staticPath)
 	if err != nil {
 		return err
@@ -50,6 +70,11 @@ func ServeStatic(w http.ResponseWriter, staticPath string) error {
 	case ".json":
 		w.Header().Set("Content-Type", "application/json")
 	}
-	_, err = w.Write(staticContent)
-	return err
+	// Revalidate with an ETag: repeat navigations get a tiny 304 instead of
+	// re-downloading ~1MB of assets (the logo GIF, chart.js, fonts), while a new
+	// build changes the hash so clients never serve stale assets.
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("ETag", staticETag(staticPath, staticContent))
+	http.ServeContent(w, r, filepath.Base(staticPath), time.Time{}, bytes.NewReader(staticContent))
+	return nil
 }
